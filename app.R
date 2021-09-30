@@ -145,6 +145,7 @@ ui <- dashboardPage(
       tabItem(tabName = "speed",
               fluidRow(infoBoxOutput("del"),infoBoxOutput("avg_s2d"),infoBoxOutput("avg_s2dc")),
               fluidRow(plotlyOutput("speed")),br(),
+              uiOutput("speed4"),
               fluidRow(dataTableOutput("rs2d")),br(),
               fluidRow(
                 tabBox(title = "DC wise FAD/FDDS",selected = "Graph",width = 12,
@@ -156,7 +157,6 @@ ui <- dashboardPage(
               fluidRow(
                 infoBoxOutput("o_ofd"),infoBoxOutput("o_fad"),infoBoxOutput("p_fad")),
               fluidRow(plotlyOutput("fad1")),br(),
-              uiOutput("fad6"),
               fluidRow(dataTableOutput("fad2")),br(),
               # fluidRow(plotlyOutput("fad3")),br(),
               uiOutput("fad3"),
@@ -202,7 +202,7 @@ server <- function(input, output,session) {
   },ignoreInit = FALSE,ignoreNULL = FALSE)
   
   
-  base<- reactive({base_data()%>%filter(pt %in% !!p_type[[input$pt]] & mot %in% !!mode[[input$mot]] & region.x %in% !!regn[[input$rgn]])})
+  base<- reactive({base_data()%>%filter(pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]])})
   
   
   
@@ -282,8 +282,10 @@ server <- function(input, output,session) {
       layout(yaxis2 = list(overlaying = "y", side = "right"))
   })
   
+  output$speed4<- renderUI({selectInput('orgn',"Origin Region",choices = names(regn),selected = 'All')})
+  
   output$rs2d <- renderDataTable(
-    base()%>%
+    base()%>%filter(region.y %in% !!regn[[input$orgn]])%>%
       group_by(!!sym(freq[[input$period]]),region.x)%>%
       summarise(S2D = round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered,na.rm = TRUE),2))%>%
       pivot_wider(id_cols = region.x,names_from = !!sym(freq[[input$period]]),values_from = S2D),options = list(scrollX = T)
@@ -334,10 +336,11 @@ server <- function(input, output,session) {
       layout(yaxis2 = list(overlaying = "y", side = "right"))
   })
   
-  output$fad6<- renderUI({selectInput('orgn',"Origin Region",choices = names(regn),selected = 'All')})
+  
   
   output$fad2 <- renderDataTable(
-    base()%>%filter(region.y %in% !!regn[[input$orgn]])%>%group_by(!!sym(freq[[input$period]]),region.x)%>%
+    base()%>%
+      group_by(!!sym(freq[[input$period]]),region.x)%>%
       summarise(FAD = round((sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100,2))%>%
       pivot_wider(id_cols = region.x,names_from = !!sym(freq[[input$period]]),values_from = FAD), options = list(scrollX = T)
   )
