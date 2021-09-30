@@ -1,3 +1,15 @@
+credentials <- data.frame(
+  user = c("delhivery"), # mandatory
+  password = c("delhivery@strategic"), # mandatory
+  start = c("2021-09-01"), # optional (all others)
+  expire = c("2021-12-31"),
+  admin = c(FALSE),
+  comment = "Simple and secure authentification mechanism 
+  for single ‘Shiny’ applications.",
+  stringsAsFactors = FALSE
+)
+
+
 library(tidyverse)
 library(lubridate)
 library(DBI)
@@ -14,9 +26,9 @@ library(rlang)
 library(r2d3)
 library(config)
 library(plotly)
-library(daterangepicker)
 library(RMySQL)
 library(data.table)
+library(stringr)
 
 
 dtt<- seq(ymd('2021-08-31'), ymd('2021-12-31'), "day")
@@ -72,15 +84,15 @@ ui <- dashboardPage(
       tags$style(HTML(".sidebar {
                       height: 95vh; overflow-y: auto;
                     }"
-      ) # close HTML       
-      )            # close tags$style
+      )        
+      )            
     ),
     
-    menuItem("Speed", tabName = "speed" ,icon = icon("th"),badgeLabel = "1",badgeColor = "green"),    
-    menuItem("FAD/FDDS", tabName = "fad",icon = icon("th"),badgeLabel = "2",badgeColor = "green"),
-    menuItem("Breach", tabName = "brch",icon = icon("th"),badgeLabel = "3",badgeColor = "green"),
-    menuItem("Manifest & Pickup", tabName = "pikup",icon = icon("th"),badgeLabel = "4",badgeColor = "green"),
-    menuItem("DB Filters",icon = icon("filter"),startExpanded = TRUE,
+    menuItem("Speed", tabName = "speed" ,icon = icon("th")),    
+    menuItem("FAD/FDDS", tabName = "fad",icon = icon("th")),
+    menuItem("Breach", tabName = "brch",icon = icon("th")),
+    menuItem("Manifest & Pickup", tabName = "pikup",icon = icon("th")),br(),
+    menuItem("Filters",icon = icon("filter"),startExpanded = TRUE,
              
              selectInput(
                inputId = "client",
@@ -96,34 +108,9 @@ ui <- dashboardPage(
                             min = min(dtt),separator = "-"
              ),
              
-             actionButton(inputId = "btn",label = "Apply Filter")),
+             actionButton(inputId = "btn",label = "Apply Filter"))
     
-    menuItem("UI Filters",icon = icon("filter"),startExpanded = TRUE,
-             
-             selectInput("period","Frequency",choices = names(freq)),
-             
-             selectizeInput(
-               inputId = "rgn", 
-               label = "Select a region", 
-               choices = names(regn), 
-               selected = "All"
-             ),
-             
-             selectizeInput(
-               inputId = "pt",
-               label = "Pt:",
-               choices = names(p_type),
-               size = 3,
-               selected = "Both"
-             ),
-             selectizeInput(
-               inputId = "mot",
-               label = "MOT:",
-               choices = names(mode),
-               size = 3,
-               selected = "Both"
-             ))
-    
+   
   )),
   dashboardBody(
     tags$head(
@@ -131,10 +118,29 @@ ui <- dashboardPage(
                       position: fixed; overflow-y: auto;
                       width: 230px;
                     }"
-      ) # close HTML       
-      )            # close tags$style
+      )       
+      )           
     ),
     
+    fluidRow(column(3,selectInput("period","Frequency",choices = names(freq))),column(3,selectInput(
+      inputId = "rgn", 
+      label = "Destination region", 
+      choices = names(regn), 
+      selected = "All"
+    )),column(3,selectizeInput(
+      inputId = "pt",
+      label = "Payment type",
+      choices = names(p_type),
+      size = 3,
+      selected = "Both"
+    )),
+    column(3,selectizeInput(
+      inputId = "mot",
+      label = "Mode of transport",
+      choices = names(mode),
+      size = 3,
+      selected = "Both"
+    ))),
     tabItems(
       tabItem(tabName = "speed",
               fluidRow(infoBoxOutput("del"),infoBoxOutput("avg_s2d"),infoBoxOutput("avg_s2dc")),
@@ -150,8 +156,10 @@ ui <- dashboardPage(
               fluidRow(
                 infoBoxOutput("o_ofd"),infoBoxOutput("o_fad"),infoBoxOutput("p_fad")),
               fluidRow(plotlyOutput("fad1")),br(),
+              uiOutput("fad6"),
               fluidRow(dataTableOutput("fad2")),br(),
-              fluidRow(plotlyOutput("fad3")),br(),
+              # fluidRow(plotlyOutput("fad3")),br(),
+              uiOutput("fad3"),
               fluidRow(
                 tabBox(title = "DC wise FAD/FDDS",selected = "Graph",width = 12,
                        tabPanel("Graph",plotlyOutput("fad4",height = 600)),
@@ -167,19 +175,14 @@ ui <- dashboardPage(
     )
   )
 )
+ui <- secure_app(ui)
 
 server <- function(input, output,session) {
   
-  # output$freq<- renderUI({
-  #   selectInput("period","Frequency",choices = if (length(seq(input$dateRange[1], input$dateRange[2], "day"))<14) {c("Daily")} else{c("Daily","Weekly")})
-  # })
+  res_auth <- secure_server(
+    check_credentials = check_credentials(credentials)
+  )
   
-  # frequency <- reactive({
-  #   ifelse(input$period=="Daily", "Dt",
-  #          ifelse(input$period=="Weekly", "week",
-  #                 ifelse(input$period=="Monthly", "month",
-  #                        )))
-  # })
   
   base_data<-eventReactive(input$btn,{
     
@@ -189,19 +192,24 @@ server <- function(input, output,session) {
     setDT(a)
     a$Dt<- ymd(a$Dt)
     a<- left_join(a,rds%>%tbl("facility")%>%select(name,city,region,state)%>%collect(),by = c("cn"="name"))
-    a[cn=="NSZ",region:="North"]
+    a<- left_join(a,rds%>%tbl("facility")%>%select(name,city,region,state)%>%collect(),by = c("oc"="name"))
+    a[cn=="NSZ",region.x:="North"]
+    a[str_detect(cn,"Rajasthan|Punjab|Ladakh|Haryana|Uttar Pradesh|Chandigarh"),region.x:="North"]
+    a[str_detect(cn,"Maharashtra|Madhya Pradesh"),region.x:="West"]
+    a[str_detect(cn,"Kerala|Tamil Nadu|Karnataka|Telangana|Andhra Pradesh"),region.x:="South"]
+    a[str_detect(cn,"Manipur|West Bengal|Orissa"),region.x:="East"]
     
   },ignoreInit = FALSE,ignoreNULL = FALSE)
   
   
-  base<- reactive({base_data()%>%filter(pt %in% !!p_type[[input$pt]] & mot %in% !!mode[[input$mot]] & region %in% !!regn[[input$rgn]])})
+  base<- reactive({base_data()%>%filter(pt %in% !!p_type[[input$pt]] & mot %in% !!mode[[input$mot]] & region.x %in% !!regn[[input$rgn]])})
   
   
   
   output$del<- renderInfoBox({
     base()%>%summarise(sum(delivered,na.rm = TRUE))%>%
       pull() %>% round(digits = 1) %>% prettyNum(big.mark = ",") %>%
-      infoBox(title = "Delivered",icon = icon("gift"),color = "red",fill=FALSE)
+      infoBox(title = "Delivered",icon = icon("gift"),color = "blue",fill=FALSE)
     
   })
   
@@ -276,9 +284,9 @@ server <- function(input, output,session) {
   
   output$rs2d <- renderDataTable(
     base()%>%
-      group_by(!!sym(freq[[input$period]]),region)%>%
+      group_by(!!sym(freq[[input$period]]),region.x)%>%
       summarise(S2D = round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered,na.rm = TRUE),2))%>%
-      pivot_wider(id_cols = region,names_from = !!sym(freq[[input$period]]),values_from = S2D),options = list(scrollX = T)
+      pivot_wider(id_cols = region.x,names_from = !!sym(freq[[input$period]]),values_from = S2D),options = list(scrollX = T)
     
   )
   
@@ -326,23 +334,29 @@ server <- function(input, output,session) {
       layout(yaxis2 = list(overlaying = "y", side = "right"))
   })
   
+  output$fad6<- renderUI({selectInput('orgn',"Origin Region",choices = names(regn),selected = 'All')})
+  
   output$fad2 <- renderDataTable(
-    base()%>%group_by(!!sym(freq[[input$period]]),region)%>%
+    base()%>%filter(region.y %in% !!regn[[input$orgn]])%>%group_by(!!sym(freq[[input$period]]),region.x)%>%
       summarise(FAD = round((sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100,2))%>%
-      pivot_wider(id_cols = region,names_from = !!sym(freq[[input$period]]),values_from = FAD), options = list(scrollX = T)
+      pivot_wider(id_cols = region.x,names_from = !!sym(freq[[input$period]]),values_from = FAD), options = list(scrollX = T)
   )
   
-  output$fad3 <- renderPlotly({
-    plot_ly(base()%>%group_by(Dt,wday)%>%summarise(FAD = (sum(FAD,na.rm = TRUE)),OFD=sum(OFD,na.rm = TRUE)),x = ~wday) %>%
-      add_trace(y = ~OFD, type='bar',name = 'Out for delivery',textposition = 'outside',texttemplate="%{y:.2s}")%>%
-      add_trace(y = ~FAD,name = 'FAD',type='bar',textposition = 'outside',texttemplate="%{y:.2s}")%>%
-      layout(yaxis = list(title = 'Count'),xaxis = list(title = "Day") ,barmode = 'group')
-  })
+
   
+  output$fad3<- renderUI({selectInput('st',"State",choices = as.list(c(unique(base()%>%select(state.x)),"All")),selected = 'All')})
   
-  f<-reactive({base()%>%
+  f<-reactive({
+    if (input$st == 'All') {
+      base()%>%group_by(Dt,cn)%>%
+        summarise(OFD=sum(OFD,na.rm = TRUE),FAD = (sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100)%>%
+        arrange(Dt,cn,desc(OFD))  
+    }
+    else{
+    base()%>%filter(state.x %in% (input$st))%>%
       group_by(Dt,cn)%>%summarise(OFD=sum(OFD,na.rm = TRUE),FAD = (sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100)%>%
-      arrange(Dt,cn,desc(OFD))})
+      arrange(Dt,cn,desc(OFD))}})
+  
   
   
   output$fad4 <- renderPlotly({
@@ -396,4 +410,3 @@ server <- function(input, output,session) {
 }
 
 shinyApp(ui = ui, server = server)
-
