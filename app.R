@@ -30,7 +30,10 @@ library(RMySQL)
 library(data.table)
 library(stringr)
 library(shinycssloaders)
+library(shinyjs)
 
+
+# Initial list ------------------------------------------------------------
 
 dtt<- seq(ymd('2021-08-31'), ymd('2021-12-31'), "day")
 
@@ -78,9 +81,12 @@ rds <- dbPool(drv=RMySQL::MySQL(),
 
 
 
+# UI Section --------------------------------------------------------------
+
+
 ui <- dashboardPage(
   dashboardHeader(title = "Strategic Clients Dashbaord"),
-  dashboardSidebar(sidebarMenu(
+  dashboardSidebar(sidebarMenu(id = "sb",
     tags$head(
       tags$style(HTML(".sidebar {
                       height: 95vh; overflow-y: auto;
@@ -113,7 +119,12 @@ ui <- dashboardPage(
     
    
   )),
-  dashboardBody(
+  
+
+# UI Body -----------------------------------------------------------------
+
+  
+  dashboardBody(shinyjs::useShinyjs(),
     tags$head(
       tags$style(HTML(".sidebar {
                       position: fixed; overflow-y: auto;
@@ -123,12 +134,20 @@ ui <- dashboardPage(
       )           
     ),
     
-    fluidRow(column(3,selectInput("period","Frequency",choices = names(freq))),column(3,selectInput(
+    fluidRow(column(3,selectInput("period","Frequency",choices = names(freq))),
+             div(id="dr", column(3,selectInput(
       inputId = "rgn", 
       label = "Destination region", 
       choices = names(regn), 
       selected = "All"
-    )),column(3,selectizeInput(
+    ))),
+    shinyjs::hidden(div(id="or",column(3,selectInput(
+      inputId = "rgn1", 
+      label = "Origin region", 
+      choices = names(regn), 
+      selected = "All"
+    )))),
+    column(3,selectizeInput(
       inputId = "pt",
       label = "Payment type",
       choices = names(p_type),
@@ -166,7 +185,10 @@ ui <- dashboardPage(
                        tabPanel("Graph",plotlyOutput("fad4",height = 600)),
                        tabPanel("Table",dataTableOutput("fad5"))))
       ),
-      tabItem(tabName = "pikup",withSpinner(tagList(
+      
+      
+      tabItem(tabName = "pikup",
+              withSpinner(tagList(
               fluidRow(infoBoxOutput("o_man"),infoBoxOutput("o_pik")),
               fluidRow(plotlyOutput("mfest")),br(),
               fluidRow(plotlyOutput("mfest1")),br(),
@@ -186,14 +208,16 @@ server <- function(input, output,session) {
   
   
   base_data<-eventReactive(input$btn,{
-    
+   
     a<-rds%>%tbl("s_analytics")%>%
       filter(cl %in% !!client[[input$client]] & pt %in% !!p_type[["Both"]] & mot %in% !!mode[["Both"]] & Dt %in% !!seq(input$dateRange[1], input$dateRange[2], "day"))%>%
       select(-CRD_NonOTP,-CRD_OTP,-Others,-CNA,-CRR,-year,-month,-ANF,-ODA,-Self_Collect,-Bulkout)%>%collect()
     setDT(a)
+    
     a$Dt<- ymd(a$Dt)
     a<- left_join(a,rds%>%tbl("facility")%>%select(name,city,region,state)%>%collect(),by = c("cn"="name"))
     a<- left_join(a,rds%>%tbl("facility")%>%select(name,city,region,state)%>%collect(),by = c("oc"="name"))
+    
     a[cn=="NSZ",region.x:="North"]
     a[is.na(region.x) & str_detect(cn,"Rajasthan|Punjab|Ladakh|Haryana|Uttar Pradesh|Chandigarh"),region.x:="North"]
     a[is.na(region.x) & str_detect(cn,"Maharashtra|Madhya Pradesh"),region.x:="West"]
@@ -206,9 +230,15 @@ server <- function(input, output,session) {
   # base<- reactive({base_data()%>%
   #     filter(pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]])})
   
-  base<- reactive({base_data()[pt %in% eval(p_type[[input$pt]]) & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]],]})
-
   
+  base<- reactive({ 
+    b<-base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]],]
+    })
+  
+  
+  
+ 
+
   
   output$del<- renderInfoBox({
     base()%>%filter(!is.na(delivered))%>%summarise(sum(delivered,na.rm = TRUE))%>%
@@ -415,6 +445,18 @@ server <- function(input, output,session) {
       layout(yaxis = list(title = 'Count'),xaxis = list(title = "Period") ,barmode = 'group')
     
   })
+
+  observe({
+    if(isTruthy(input$sb == "pikup")) {
+      shinyjs::show("or")
+      shinyjs::hide("dr")
+      
+    } 
+    else {shinyjs::hide("or")
+      shinyjs::show("dr")}
+    
+  })
+  
   
 }
 
