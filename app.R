@@ -241,29 +241,29 @@ server <- function(input, output,session) {
 
   
   output$del<- renderInfoBox({
-    base()%>%filter(!is.na(delivered))%>%summarise(sum(delivered,na.rm = TRUE))%>%
-      pull() %>% round(digits = 1) %>% prettyNum(big.mark = ",") %>%
+    x<- base()[!is.na(delivered),.(sum(delivered))]
+    x%>%round(digits = 1) %>% prettyNum(big.mark = ",") %>%
       infoBox(title = "Delivered",icon = icon("gift"),color = "blue",fill=FALSE)
     
   })
   
   output$o_ofd<- renderInfoBox({
-    base()%>%filter(!is.na(OFD))%>%summarise(sum(OFD))%>%
-      pull() %>% round(digits = 1) %>% prettyNum(big.mark = ",") %>%
+    x<- base()[!is.na(OFD),.(sum(OFD))]
+    x%>%round(digits = 1) %>% prettyNum(big.mark = ",") %>%
       infoBox(title = "OFD",icon = icon("gift"))
     
   })
   
   output$o_fad<- renderInfoBox({
-    base()%>%filter(!is.na(OFD))%>%summarise(sum(FAD,na.rm = TRUE))%>%
-      pull() %>% round(digits = 1) %>% prettyNum(big.mark = ",") %>%
+    x<- base()[!is.na(OFD),.(sum(FAD,na.rm = TRUE))]
+    x%>%round(digits = 1) %>% prettyNum(big.mark = ",") %>%
       infoBox(title = "FAD#",icon = icon("list"),color = "purple")
     
   })
   
   output$p_fad<- renderInfoBox({
     
-    x<-base()%>%filter(!is.na(OFD))%>%summarise((sum(FAD,na.rm = TRUE)/sum(OFD))*100)
+    x<-base()[!is.na(OFD),.((sum(FAD,na.rm = TRUE)/sum(OFD))*100)]
     ic<- 'thumbs-down'
     clr<- 'yellow'
     if(x > 90) {
@@ -276,29 +276,29 @@ server <- function(input, output,session) {
   
   
   output$avg_s2d<- renderInfoBox({
-    base()%>%filter(!is.na(delivered))%>%summarise(round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered,na.rm = TRUE),2))%>%
-      pull() %>% round(digits = 2)%>%
+    x<- base()[!is.na(delivered),.(round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered),2))]
+    x%>%round(digits = 2)%>%
       infoBox(title = "S2D",icon = icon("dashboard"),color = "purple",fill=FALSE)
     
   })
   
   output$avg_s2dc<- renderInfoBox({
-    base()%>%filter(!is.na(delivered))%>%summarise(round(sum((S2DC*delivered),na.rm = TRUE)/sum(delivered,na.rm = TRUE),2))%>%
-      pull() %>% round(digits = 2)%>%
+    x<- base()[!is.na(delivered),.(round(sum((S2DC*delivered),na.rm = TRUE)/sum(delivered),2))]
+    x %>% round(digits = 2)%>%
       infoBox(title = "S2DC",icon = icon("dashboard"),color = "purple",fill=FALSE)
     
   })
   
   output$o_man<- renderInfoBox({
-    base()%>%filter(!is.na(manifested))%>%summarise(sum(manifested))%>%
-      pull() %>% prettyNum(big.mark = ",")%>%
+    x<- base()[!is.na(manifested),.(sum(manifested))]
+    x%>% prettyNum(big.mark = ",")%>%
       infoBox(title = "Manifested",icon = icon("list"),color = "orange",fill=FALSE)
     
   })
   
   output$o_pik<- renderInfoBox({
-    base()%>%summarise(sum(pickup,na.rm = TRUE))%>%
-      pull() %>% prettyNum(big.mark = ",")%>%
+    x<- base()[!is.na(pickup),.(sum(pickup))]
+    x%>% prettyNum(big.mark = ",")%>%
       infoBox(title = "Pick-Up",icon = icon("list"),color = "purple",fill=FALSE)
     
   })
