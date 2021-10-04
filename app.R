@@ -363,9 +363,9 @@ server <- function(input, output,session) {
   output$breachp<- renderInfoBox({
     
     pbp<-base()%>%summarise((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100)
-    ic<- 'thumbs-down'
+    ic<- 'dashboard'
     
-    infoBox(value = pbp%>%round(digits = 2) %>% paste0("%") ,title = "PDD Breach%",icon = icon(ic),color = 'red',fill=FALSE)
+    infoBox(value = pbp%>%round(digits = 2) %>% paste0("%") ,title = "PDD Breach%",icon = icon(ic),color = 'orange',fill=FALSE)
     
   })
   
