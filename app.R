@@ -38,8 +38,8 @@ library(shinyjs)
 dtt<- seq(ymd('2021-08-31'), ymd('2021-12-31'), "day")
 
 client <-list(Amazon = c("AMAZON B2B FRACS","AMAZONINDIA","AMAZONCRETURNS"),
-              Flipkart = c("Flipkart", "FLIPKART - E2E SURFACE", "FLIPKART E2E","FLIPKART SURFACE",
-                           "FLIPKART - E2E FOOD","Flipkart Heavy"),
+                Flipkart = c("Flipkart", "FLIPKART - E2E SURFACE", "FLIPKART E2E","FLIPKART SURFACE",
+                             "FLIPKART - E2E FOOD","Flipkart Heavy"),
               Meesho = c("FTPL SURFACE","FTPL","FTPL SB","POPSHOP EXPRESS","POPSHOP SB","POPSHOP SURFACE"),
               Myntra = c("Myntra"),
               Nykaa = c("NYKAA EXPRESS", "Nykaa E Retail Surface", "Nykaa E Retail B2B","NYKAA1 SURFACE",
@@ -69,6 +69,15 @@ regn<- list(North = "North",
             All = c("North","South","East","West"))
 freq<- list(Daily = "Dt",
             Weekly = "week")
+
+zone <- list(A="A",B=c("B","B_Shared","B_SPL"),C=c("C","C1","C2","C_SPL"),
+             D=c("D","D1","D2","DMY","D_Shared","D_SPL"),
+             E="E",F="F",International="INTL",
+             
+             All=c("A","B","B_Shared","B_SPL","C","C1","C2","C_SPL","D","D1","D2","D_Shared","D_SPL","DMY","E","F","INTL"))
+
+
+
 
 
 rds <- dbPool(drv=RMySQL::MySQL(), 
@@ -134,33 +143,38 @@ ui <- dashboardPage(
       )           
     ),
     
-    fluidRow(column(3,selectInput("period","Frequency",choices = names(freq))),
-             div(id="dr", column(3,selectInput(
+    fluidRow(column(2,selectInput("period","Frequency",choices = names(freq))),
+             div(id="dr", column(2,selectInput(
       inputId = "rgn", 
       label = "Destination region", 
       choices = names(regn), 
       selected = "All"
     ))),
-    shinyjs::hidden(div(id="or",column(3,selectInput(
+    shinyjs::hidden(div(id="or",column(2,selectInput(
       inputId = "rgn1", 
       label = "Origin region", 
       choices = names(regn), 
       selected = "All"
     )))),
-    column(3,selectizeInput(
+    column(2,selectizeInput(
       inputId = "pt",
       label = "Payment type",
       choices = names(p_type),
       size = 3,
       selected = "Both"
     )),
-    column(3,selectizeInput(
+    column(2,selectizeInput(
       inputId = "mot",
       label = "Mode of transport",
       choices = names(mode),
       size = 3,
       selected = "Both"
-    ))),
+    )),
+    column(2,selectInput("bzn","Billing Zone",choices = names(zone),selected = "All")),
+    column(2,
+           selectInput('clnt',"HQ Name",choices = as.list(c(client[["Nykaa"]],"All")),selected = 'All')
+           )
+    ),
     tabItems(
       tabItem(tabName = "speed",withSpinner(tagList(
               fluidRow(infoBoxOutput("del"),infoBoxOutput("avg_s2d"),infoBoxOutput("avg_s2dc")),
@@ -186,13 +200,26 @@ ui <- dashboardPage(
                        tabPanel("Table",dataTableOutput("fad5"))))
       ),
       
+      tabItem(tabName="brch",
+              
+              fluidRow(infoBoxOutput("promised",width = 3),infoBoxOutput("breach",width = 3),infoBoxOutput("promisedundel",width = 3),infoBoxOutput("breachp",width = 3)),
+              
+              fluidRow(plotlyOutput("Breachplt"),br(),
+                       uiOutput("brch1"),
+                       fluidRow(dataTableOutput("brch2")),
+                       uiOutput("brch3"),
+                       fluidRow(plotlyOutput("mapbr", height=600))
+                       
+              )),
+      
       
       tabItem(tabName = "pikup",
               withSpinner(tagList(
               fluidRow(infoBoxOutput("o_man"),infoBoxOutput("o_pik")),
               fluidRow(plotlyOutput("mfest")),br(),
               fluidRow(plotlyOutput("mfest1")),br(),
-              fluidRow(plotlyOutput("mfest2"))),color="#0dc5c1"),br()
+              uiOutput("mfest3"),
+              fluidRow(plotlyOutput("mfest2"))),color="#0dc5c1")
       )
       
     )
@@ -206,17 +233,17 @@ server <- function(input, output,session) {
     check_credentials = check_credentials(credentials)
   )
   
+
   
-  base_data<-eventReactive(input$btn,{
-   
+  base_data<-eventReactive(input$btn,{shinyjs::disable("btn")
     a<-rds%>%tbl("s_analytics")%>%
       filter(cl %in% !!client[[input$client]] & pt %in% !!p_type[["Both"]] & mot %in% !!mode[["Both"]] & Dt %in% !!seq(input$dateRange[1], input$dateRange[2], "day"))%>%
       select(-CRD_NonOTP,-CRD_OTP,-Others,-CNA,-CRR,-year,-month,-ANF,-ODA,-Self_Collect,-Bulkout)%>%collect()
     setDT(a)
     
     a$Dt<- ymd(a$Dt)
-    a<- left_join(a,rds%>%tbl("facility")%>%select(name,city,region,state)%>%collect(),by = c("cn"="name"))
-    a<- left_join(a,rds%>%tbl("facility")%>%select(name,city,region,state)%>%collect(),by = c("oc"="name"))
+    a<- left_join(a,rds%>%tbl("facility")%>%select(name,city,region,state,lat,lon)%>%collect(),by = c("cn"="name"))
+    a<- left_join(a,rds%>%tbl("facility")%>%select(name,city,region,state,lat,lon)%>%collect(),by = c("oc"="name"))
     
     a[cn=="NSZ",region.x:="North"]
     a[is.na(region.x) & str_detect(cn,"Rajasthan|Punjab|Ladakh|Haryana|Uttar Pradesh|Chandigarh"),region.x:="North"]
@@ -229,24 +256,33 @@ server <- function(input, output,session) {
   
   # base<- reactive({base_data()%>%
   #     filter(pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]])})
-  
-  
+
+  observeEvent(input$btn,{updateSelectInput(session,"clnt","HQ Name",choices = as.list(c(client[[input$client]],"All")),selected = 'All' )})
+    
+
   base<- reactive({ 
-    b<-base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]],]
+      if (input$clnt == 'All') {
+      base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],]
+    }
+  else{  
+   base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]] & cl == input$clnt,]
+    }
     })
   
   
-  
+  observeEvent({input$dateRange
+                input$client},{shinyjs::enable("btn")})
  
 
   
-  output$del<- renderInfoBox({
+  output$del<- renderInfoBox({ 
     x<- base()[!is.na(delivered),.(sum(delivered))]
     x%>%round(digits = 1) %>% prettyNum(big.mark = ",") %>%
       infoBox(title = "Delivered",icon = icon("gift"),color = "blue",fill=FALSE)
     
   })
   
+  # FAD Infobox ----------------------------------------------------------
   output$o_ofd<- renderInfoBox({
     x<- base()[!is.na(OFD),.(sum(OFD))]
     x%>%round(digits = 1) %>% prettyNum(big.mark = ",") %>%
@@ -303,7 +339,45 @@ server <- function(input, output,session) {
     
   })
   
+  # Promised Infobox --------------------------------------------------------
   
+  
+  output$promised<- renderInfoBox({
+    x<- base()[!is.na(Total_Promised),.(sum(Total_Promised))]
+      x %>% round(digits = 1) %>% prettyNum(big.mark = ",") %>%
+      infoBox(title = "Promised",icon = icon("gift"))
+    
+  })
+  
+  # Breach Infobox ----------------------------------------------------------
+  
+  
+  output$breach<- renderInfoBox({
+    x<- base()[!is.na(Total_Promised),.(sum(PDD_Breach,na.rm = TRUE))]
+     x%>% round(digits = 1) %>% prettyNum(big.mark = ",") %>%
+      infoBox(title = "PDD Breach",icon = icon("exclamation-circle"))
+    
+  })
+  
+  
+  output$breachp<- renderInfoBox({
+    
+    pbp<-base()%>%summarise((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100)
+    ic<- 'thumbs-down'
+    
+    infoBox(value = pbp%>%round(digits = 2) %>% paste0("%") ,title = "PDD Breach%",icon = icon(ic),color = 'red',fill=FALSE)
+    
+  })
+  
+  
+  output$promisedundel<- renderInfoBox({
+    x<- base()[!is.na(Total_Promised),.(sum(Promised_undel,na.rm=TRUE))]
+    x%>% round(digits = 1) %>% prettyNum(big.mark = ",")%>%
+      infoBox(title = "Promised Undelivered",icon = icon("gift"))
+    
+  })
+  
+  # Speed ----------------------------------------------------------
   
   output$speed <- renderPlotly({
      sp<- base()%>%filter(!is.na(delivered))%>%group_by(!!sym(freq[[input$period]]))%>%
@@ -362,7 +436,7 @@ server <- function(input, output,session) {
     )
   )
   
-  
+  # FDDS ----------------------------------------------------------
   output$fad1 <- renderPlotly({
     fd<- base()%>%filter(!is.na(OFD))%>%group_by(!!sym(freq[[input$period]]))%>%
       summarise(OFD = sum(OFD),FAD = (sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100)
@@ -427,6 +501,66 @@ server <- function(input, output,session) {
     )
   )
   
+  
+  # Breach ----------------------------------------------------------
+  
+  output$Breachplt <- renderPlotly({
+    sp<- base()%>%group_by(!!sym(freq[[input$period]]))%>%
+      summarise(Promise = sum(Total_Promised,na.rm = TRUE),Promise_UD =sum(Promised_undel,na.rm = TRUE), Breach=round(sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE)*100,2),na.rm = TRUE)
+    plot_ly(data = sp,x = as.formula(paste0("~", freq[[input$period]]))) %>%
+      add_trace(y = ~Promise,type = "bar", name = "Promised",textposition = 'outside',texttemplate="%{y:.2s}",marker = list(color = 'rgb(158,202,225)',line = list(color = 'rgb(8,48,107)'))) %>%
+      add_trace(y = ~Breach,mode = "line", type='scatter', yaxis = "y2", name = "Breach%",color='rgb(220,20,60)',text=~round(Breach,2),textposition= "top center") %>%
+      layout(yaxis2 = list(overlaying = "y", side = "right"))
+  })
+  
+  
+  output$brch1<- renderUI({selectInput('borgn',"Origin Region",choices = names(regn),selected = 'All')})
+  
+  output$brch2 <- renderDataTable(
+    base()%>%filter(region.y %in% !!regn[[input$borgn]])%>%
+      group_by(!!sym(freq[[input$period]]),region.x)%>%
+      summarise(Breach = round((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100,2))%>%
+      pivot_wider(id_cols = region.x,names_from = !!sym(freq[[input$period]]),values_from =Breach),options = list(scrollX = T)
+    
+  )
+  
+  
+  
+  output$brch3 <- renderUI({ dateRangeInput(inputId = "dr2", 
+                                             label = "Date Range", 
+                                             start=input$dateRange[1], end=input$dateRange[2],
+                                             min = input$dateRange[1],max = input$dateRange[2],
+                                             separator = "-"
+  )})
+
+  # Map Breach --------------------------------------------------------------
+  output$mapbr<- renderPlotly({
+    mp<-base()%>%filter(Dt %in% seq(input$dr2[1], input$dr2[2], "day"))%>%group_by(cn,lat.x,lon.x)%>%
+      summarize(Brh= round((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100,2),Prms=sum(Total_Promised,na.rm = TRUE))%>%
+      ungroup%>%filter(Prms>=median(Prms))
+    
+    mp%>%plot_ly(lat = ~lat.x,
+                 height=600,
+                 lon = ~lon.x,
+                 color = ~Brh,
+                 size  = ~Prms+10,
+                 hovertemplate = paste("DC :", mp$cn,"<br> Promised :", mp$Prms,"<br> Breach% :",paste0(mp$Brh,"%")),
+                 colors = c("springgreen","palevioletred","sandybrown","orange", "orangered", "red"),
+                 type = 'scattermapbox'
+    )%>%layout(
+      
+      mapbox = list(
+        
+        style = 'open-street-map',
+        zoom =3,
+        center = list(lon =85.15743, lat = 25.600421))
+        )
+    
+  })
+  
+  
+  
+  
   output$mfest<- renderPlotly({
     plot_ly(data = base()%>%group_by(!!sym(freq[[input$period]]))%>%
               summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE)),x = as.formula(paste0("~", freq[[input$period]])))%>%
@@ -445,6 +579,38 @@ server <- function(input, output,session) {
       layout(yaxis = list(title = 'Count'),xaxis = list(title = "Period") ,barmode = 'group')
     
   })
+  
+  
+  output$mfest3 <- renderUI({ dateRangeInput(inputId = "dr1", 
+                                             label = "Date Range", 
+                                             start=input$dateRange[1], end=input$dateRange[2],
+                                             min = input$dateRange[1],max = input$dateRange[2],
+                                             separator = "-"
+  )})
+  
+  # Map Pickup --------------------------------------------------------------
+  output$mfest2<- renderPlotly({
+    mp<-base()%>%filter(!is.na(pickup) & Dt %in% seq(input$dr1[1], input$dr1[2], "day"))%>%
+      group_by(oc,lat.y,lon.y)%>%
+      summarize(pickup = sum(pickup,na.rm = TRUE))
+    
+    mp%>%plot_ly(lat = ~lat.y,
+                 lon = ~lon.y,
+                 size  = ~pickup,
+                 hovertemplate = paste("OC :", mp$oc,"<br> Pickup :", mp$pickup),
+                 #colors = c("springgreen","palevioletred","sandybrown","orange", "orangered", "red"),
+                 type = 'scattermapbox'
+    )%>%layout(
+      
+      mapbox = list(
+        
+        style = 'open-street-map',
+        zoom =3,
+        center = list(lon =85.15743, lat = 25.600421))
+    )
+    
+  })
+  
 
   observe({
     if(isTruthy(input$sb == "pikup")) {
