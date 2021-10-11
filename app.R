@@ -37,7 +37,7 @@ library(RcppRoll)
 # Initial list ------------------------------------------------------------
 
 dtt<- seq(ymd('2021-08-31'), ymd('2021-12-31'), "day")
-dtt1<- seq(today()-8,today()-1,"day")
+#dtt1<- seq(today()-30,today()-1,"day")
 
 client <-list(Amazon = c("AMAZON B2B FRACS","AMAZONINDIA","AMAZONCRETURNS"),
                 Flipkart = c("Flipkart", "FLIPKART - E2E SURFACE", "FLIPKART E2E","FLIPKART SURFACE",
@@ -60,7 +60,10 @@ client <-list(Amazon = c("AMAZON B2B FRACS","AMAZONINDIA","AMAZONCRETURNS"),
 
 p_type<- list(COD = c("COD"),
               PrePaid = c("Pre-paid"),
-              Both = c("COD","Pre-paid"))
+              Pickup = c("Pickup"),
+              REPL = c("REPL"),
+              All = c("COD","Pre-paid","Pickup","REPL"))
+
 mode<- list(E = "E",
             S = "S",
             Both = c("E","S"))
@@ -78,6 +81,11 @@ zone <- list(A="A",B=c("B","B_Shared","B_SPL"),C=c("C","C1","C2","C_SPL"),
              
              All=c("A","B","B_Shared","B_SPL","C","C1","C2","C_SPL","D","D1","D2","D_Shared","D_SPL","DMY","E","F","INTL"))
 
+vol<- list("Top 25" = 25,
+           "Top 50" = 50,
+           "Top 100" = 100,
+           "Top 200" = 200,
+           "Top 400" = 400)
  
 
 
@@ -161,8 +169,8 @@ ui <- dashboardPage(
       inputId = "pt",
       label = "Payment type",
       choices = names(p_type),
-      size = 3,
-      selected = "Both"
+      size = 5,
+      selected = "All"
     )),
     column(2,selectizeInput(
       inputId = "mot",
@@ -219,8 +227,11 @@ ui <- dashboardPage(
               fluidRow(infoBoxOutput("o_man"),infoBoxOutput("o_pik")),
               fluidRow(plotlyOutput("mfest")),br(),
               fluidRow(plotlyOutput("mfest1")),br(),
-              uiOutput("mfest3"),
-              fluidRow(plotlyOutput("mfest2"))),color="#0dc5c1")
+              #uiOutput("mfest3"),
+              #fluidRow(plotlyOutput("mfest2")),br(),
+              fluidRow(column(3,uiOutput("p_day")),column(3,sliderInput("adays",label = "Days to compare",min = 2,max = 5,step = 1,value = 3)),
+                       column(3,selectInput("pvol","Volume Filter",choices = names(vol),selected = "Top 50"))),
+              fluidRow(plotlyOutput("mfest4",height = 600))),color="#0dc5c1")
       )
       
     )
@@ -239,7 +250,7 @@ server <- function(input, output,session) {
   base_data<-eventReactive(input$btn,{shinyjs::disable("btn")
     
     a<-rds%>%tbl("s_analytics")%>%
-      filter(cl %in% !!client[[input$client]] & pt %in% !!p_type[["Both"]] & mot %in% !!mode[["Both"]] & Dt %in% !!seq(input$dateRange[1], input$dateRange[2], "day"))%>%
+      filter(cl %in% !!client[[input$client]] & pt %in% !!p_type[["All"]] & mot %in% !!mode[["Both"]] & Dt %in% !!seq(input$dateRange[1]-5, input$dateRange[2], "day"))%>%
       select(-CRD_NonOTP,-CRD_OTP,-Others,-CNA,-CRR,-year,-month,-ANF,-ODA,sh_opt,-Bulkout,-pdt)%>%collect()
     setDT(a)
     
@@ -253,13 +264,13 @@ server <- function(input, output,session) {
     a[is.na(region.x) & str_detect(cn,"Kerala|Tamil Nadu|Karnataka|Telangana|Andhra Pradesh"),region.x:="South"]
     a[is.na(region.x) & str_detect(cn,"Manipur|West Bengal|Orissa"),region.x:="East"]
     
-    b<-rds%>%tbl("s_analytics")%>%
-      filter(cl %in% !!client[[input$client]] & pt %in% !!p_type[["Both"]] & mot %in% !!mode[["Both"]] & Dt %in% !!seq(input$dateRange[1]-7, input$dateRange[2], "day"))%>%
-      group_by(Dt,week)%>%summarise(pickup = sum(pickup))%>%collect()
-    setDT(b)
-    
-    b$Dt<- ymd(b$Dt)
-    c<- list(a=a,b=b)
+    # b<-rds%>%tbl("s_analytics")%>%
+    #   filter(cl %in% !!client[[input$client]] & pt %in% !!p_type[["All"]] & mot %in% !!mode[["Both"]] & Dt %in% !!seq(input$dateRange[1]-7, input$dateRange[2], "day"))%>%
+    #   group_by(Dt,week)%>%summarise(pickup = sum(pickup))%>%collect()
+    # setDT(b)
+    # 
+    # b$Dt<- ymd(b$Dt)
+    # c<- list(a=a,b=b)
     
   },ignoreInit = FALSE,ignoreNULL = FALSE)
   
@@ -270,11 +281,15 @@ server <- function(input, output,session) {
 
   base<- reactive({ 
       if (input$clnt == 'All') {
-      base_data()$a[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],]
-    }
+     a<- base_data()[Dt >= input$dateRange[1] & pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],]
+     b<- base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],]
+     c<- list(a=a,b=b)
+     }
   else{  
-   base_data()$a[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]] & cl %in% input$clnt,]
-    }
+   a<-base_data()[Dt >= input$dateRange[1] & pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]] & cl %in% input$clnt,]
+   b<- base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],] 
+   c<- list(a=a,b=b)
+   }
     })
   
   
@@ -284,7 +299,7 @@ server <- function(input, output,session) {
 
   
   output$del<- renderInfoBox({ 
-    x<- base()[!is.na(delivered),.(sum(delivered))]
+    x<- base()$a[!is.na(delivered),.(sum(delivered))]
     x%>%round(digits = 1) %>% prettyNum(big.mark = ",") %>%
       infoBox(title = "Delivered",icon = icon("gift"),color = "blue",fill=FALSE)
     
@@ -292,14 +307,14 @@ server <- function(input, output,session) {
   
   # FAD Infobox ----------------------------------------------------------
   output$o_ofd<- renderInfoBox({
-    x<- base()[!is.na(OFD),.(sum(OFD))]
+    x<- base()$a[!is.na(OFD),.(sum(OFD))]
     x%>%round(digits = 1) %>% prettyNum(big.mark = ",") %>%
       infoBox(title = "OFD",icon = icon("gift"))
     
   })
   
   output$o_fad<- renderInfoBox({
-    x<- base()[!is.na(OFD),.(sum(FAD,na.rm = TRUE))]
+    x<- base()$a[!is.na(OFD),.(sum(FAD,na.rm = TRUE))]
     x%>%round(digits = 1) %>% prettyNum(big.mark = ",") %>%
       infoBox(title = "FAD#",icon = icon("list"),color = "purple")
     
@@ -307,7 +322,7 @@ server <- function(input, output,session) {
   
   output$p_fad<- renderInfoBox({
     
-    x<-base()[!is.na(OFD),.((sum(FAD,na.rm = TRUE)/sum(OFD))*100)]
+    x<-base()$a[!is.na(OFD),.((sum(FAD,na.rm = TRUE)/sum(OFD))*100)]
     ic<- 'thumbs-down'
     clr<- 'yellow'
     if(x > 90) {
@@ -320,28 +335,28 @@ server <- function(input, output,session) {
   
   
   output$avg_s2d<- renderInfoBox({
-    x<- base()[!is.na(delivered),.(round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered),2))]
+    x<- base()$a[!is.na(delivered),.(round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered),2))]
     x%>%round(digits = 2)%>%
       infoBox(title = "S2D",icon = icon("dashboard"),color = "purple",fill=FALSE)
     
   })
   
   output$avg_s2dc<- renderInfoBox({
-    x<- base()[!is.na(delivered),.(round(sum((S2DC*delivered),na.rm = TRUE)/sum(delivered),2))]
+    x<- base()$a[!is.na(delivered),.(round(sum((S2DC*delivered),na.rm = TRUE)/sum(delivered),2))]
     x %>% round(digits = 2)%>%
       infoBox(title = "S2DC",icon = icon("dashboard"),color = "purple",fill=FALSE)
     
   })
   
   output$o_man<- renderInfoBox({
-    x<- base()[!is.na(manifested),.(sum(manifested))]
+    x<- base()$a[!is.na(manifested),.(sum(manifested))]
     x%>% prettyNum(big.mark = ",")%>%
       infoBox(title = "Manifested",icon = icon("list"),color = "orange",fill=FALSE)
     
   })
   
   output$o_pik<- renderInfoBox({
-    x<- base()[!is.na(pickup),.(sum(pickup))]
+    x<- base()$a[!is.na(pickup),.(sum(pickup))]
     x%>% prettyNum(big.mark = ",")%>%
       infoBox(title = "Pick-Up",icon = icon("list"),color = "purple",fill=FALSE)
     
@@ -351,7 +366,7 @@ server <- function(input, output,session) {
   
   
   output$promised<- renderInfoBox({
-    x<- base()[!is.na(Total_Promised),.(sum(Total_Promised))]
+    x<- base()$a[!is.na(Total_Promised),.(sum(Total_Promised))]
       x %>% round(digits = 1) %>% prettyNum(big.mark = ",") %>%
       infoBox(title = "Promised",icon = icon("gift"))
     
@@ -361,7 +376,7 @@ server <- function(input, output,session) {
   
   
   output$breach<- renderInfoBox({
-    x<- base()[!is.na(Total_Promised),.(sum(PDD_Breach,na.rm = TRUE))]
+    x<- base()$a[!is.na(Total_Promised),.(sum(PDD_Breach,na.rm = TRUE))]
      x%>% round(digits = 1) %>% prettyNum(big.mark = ",") %>%
       infoBox(title = "PDD Breach",icon = icon("exclamation-circle"))
     
@@ -370,7 +385,7 @@ server <- function(input, output,session) {
   
   output$breachp<- renderInfoBox({
     
-    pbp<-base()%>%summarise((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100)
+    pbp<-base()$a%>%summarise((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100)
     ic<- 'dashboard'
     
     infoBox(value = pbp%>%round(digits = 2) %>% paste0("%") ,title = "PDD Breach%",icon = icon(ic),color = 'orange',fill=FALSE)
@@ -379,7 +394,7 @@ server <- function(input, output,session) {
   
   
   output$promisedundel<- renderInfoBox({
-    x<- base()[!is.na(Total_Promised),.(sum(Promised_undel,na.rm=TRUE))]
+    x<- base()$a[!is.na(Total_Promised),.(sum(Promised_undel,na.rm=TRUE))]
     x%>% round(digits = 1) %>% prettyNum(big.mark = ",")%>%
       infoBox(title = "Promised Undelivered",icon = icon("gift"))
     
@@ -388,7 +403,7 @@ server <- function(input, output,session) {
   # Speed ----------------------------------------------------------
   
   output$speed <- renderPlotly({
-     sp<- base()%>%filter(!is.na(delivered))%>%group_by(!!sym(freq[[input$period]]))%>%
+     sp<- base()$a%>%filter(!is.na(delivered))%>%group_by(!!sym(freq[[input$period]]))%>%
        summarise(Del = sum(delivered),S2D = round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered),2),S2DC = round(sum((S2DC*delivered),na.rm = TRUE)/sum(delivered),2),S2Pro = round(sum((S2Pro*delivered),na.rm = TRUE)/sum(delivered),2))
     
     
@@ -403,14 +418,14 @@ server <- function(input, output,session) {
   output$speed4<- renderUI({selectInput('orgn',"Origin Region",choices = names(regn),selected = 'All')})
   
   output$rs2d <- renderDataTable(
-    base()%>%filter(!is.na(delivered) & region.y %in% !!regn[[input$orgn]])%>%
+    base()$a%>%filter(!is.na(delivered) & region.y %in% !!regn[[input$orgn]])%>%
       group_by(!!sym(freq[[input$period]]),region.x)%>%
       summarise(S2D = round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered,na.rm = TRUE),2))%>%
       pivot_wider(id_cols = region.x,names_from = !!sym(freq[[input$period]]),values_from = S2D),options = list(scrollX = T)
     
   )
   
-  l<- reactive({base()%>%filter(!is.na(delivered))%>%
+  l<- reactive({base()$a%>%filter(!is.na(delivered))%>%
       group_by(Dt,oc,cn)%>%summarise(Del=sum(delivered),S2D = round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered,na.rm = TRUE),2))%>%
       filter(oc!="" &  !is.nan(S2D))%>%arrange(Dt,desc(Del))})
   
@@ -445,7 +460,7 @@ server <- function(input, output,session) {
   
   # FDDS ----------------------------------------------------------
   output$fad1 <- renderPlotly({
-    fd<- base()%>%filter(!is.na(OFD))%>%group_by(!!sym(freq[[input$period]]))%>%
+    fd<- base()$a%>%filter(!is.na(OFD))%>%group_by(!!sym(freq[[input$period]]))%>%
       summarise(OFD = sum(OFD),FAD = (sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100)
     plot_ly(data = fd,x = as.formula(paste0("~", freq[[input$period]]))) %>%
       add_trace(y = ~OFD,type = "bar", name = "OFD",textposition = 'auto',texttemplate="%{y:.2s}",marker = list(color = 'rgb(158,202,225)',line = list(color = 'rgb(8,48,107)'))) %>%
@@ -456,7 +471,7 @@ server <- function(input, output,session) {
   
   
   output$fad2 <- renderDataTable(
-    base()%>%filter(!is.na(OFD))%>%
+    base()$a%>%filter(!is.na(OFD))%>%
       group_by(!!sym(freq[[input$period]]),region.x)%>%
       summarise(FAD = round((sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100,2))%>%
       pivot_wider(id_cols = region.x,names_from = !!sym(freq[[input$period]]),values_from = FAD), options = list(scrollX = T)
@@ -464,16 +479,16 @@ server <- function(input, output,session) {
   
 
   
-  output$fad3<- renderUI({selectInput('st',"State",choices = as.list(c(unique(base()%>%select(state.x)),"All")),selected = 'All')})
+  output$fad3<- renderUI({selectInput('st',"State",choices = as.list(c(unique(base()$a%>%select(state.x)),"All")),selected = 'All')})
   
   f<-reactive({req(input$st)
     if (input$st == 'All') {
-      base()%>%group_by(Dt,cn)%>%
+      base()$a%>%group_by(Dt,cn)%>%
         summarise(OFD=sum(OFD,na.rm = TRUE),FAD = (sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100)%>%
         arrange(Dt,cn,desc(OFD))  
     }
     else{
-    base()%>%filter(state.x %in% (input$st))%>%
+    base()$a%>%filter(state.x %in% (input$st))%>%
       group_by(Dt,cn)%>%summarise(OFD=sum(OFD,na.rm = TRUE),FAD = (sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100)%>%
       arrange(Dt,cn,desc(OFD))}})
   
@@ -512,7 +527,7 @@ server <- function(input, output,session) {
   # Breach ----------------------------------------------------------
   
   output$Breachplt <- renderPlotly({
-    sp<- base()%>%group_by(!!sym(freq[[input$period]]))%>%
+    sp<- base()$a%>%group_by(!!sym(freq[[input$period]]))%>%
       summarise(Promise = sum(Total_Promised,na.rm = TRUE),Promise_UD =sum(Promised_undel,na.rm = TRUE), Breach=round(sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE)*100,2),na.rm = TRUE)
     plot_ly(data = sp,x = as.formula(paste0("~", freq[[input$period]]))) %>%
       add_trace(y = ~Promise,type = "bar", name = "Promised",textposition = 'outside',texttemplate="%{y:.2s}",marker = list(color = 'rgb(158,202,225)',line = list(color = 'rgb(8,48,107)'))) %>%
@@ -524,7 +539,7 @@ server <- function(input, output,session) {
   output$brch1<- renderUI({selectInput('borgn',"Origin Region",choices = names(regn),selected = 'All')})
   
   output$brch2 <- renderDataTable(
-    base()%>%filter(region.y %in% !!regn[[req(input$borgn)]])%>%
+    base()$a%>%filter(region.y %in% !!regn[[req(input$borgn)]])%>%
       group_by(!!sym(freq[[input$period]]),region.x)%>%
       summarise(Breach = round((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100,2))%>%
       pivot_wider(id_cols = region.x,names_from = !!sym(freq[[input$period]]),values_from =Breach),options = list(scrollX = T)
@@ -542,7 +557,7 @@ server <- function(input, output,session) {
 
   # Map Breach --------------------------------------------------------------
   output$mapbr<- renderPlotly({req(input$dr2)
-    mp<-base()%>%filter(Dt %in% seq(input$dr2[1], input$dr2[2], "day"))%>%group_by(cn,lat.x,lon.x)%>%
+    mp<-base()$a%>%filter(Dt %in% seq(input$dr2[1], input$dr2[2], "day"))%>%group_by(cn,lat.x,lon.x)%>%
       summarize(Brh= round((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100,2),Prms=sum(Total_Promised,na.rm = TRUE))%>%
       ungroup%>%filter(Prms>=median(Prms))
     
@@ -570,32 +585,32 @@ server <- function(input, output,session) {
   
   output$mfest<- renderPlotly({
     if (freq[[input$period]]=="Dt") {
-      d<-base_data()$b%>%group_by(Dt)%>%summarise(pickup = sum(pickup))%>%
-        mutate(avg=roll_mean(pickup, n = 7, align = "right", fill = 0))%>%filter(Dt %in% seq(input$dateRange[1], input$dateRange[2], "day"))
+      d<-base()$b%>%filter(!is.na(pickup))%>%group_by(Dt)%>%summarise(pickup = sum(pickup))%>%
+        mutate(avg=roll_mean(pickup, n = 5, align = "right", fill = 0))%>%filter(Dt %in% seq(input$dateRange[1], input$dateRange[2], "day"))
       
       
-      r<- base()%>%group_by(Dt)%>%
+      r<- base()$a%>%filter(!is.na(pickup))%>%group_by(Dt)%>%
         summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE))
       #!!sym(freq[[input$period]])  
       #x = as.formula(paste0("~", freq[[input$period]]))
       plot_ly()%>%
         add_trace(data = r,y = ~manifest,mode = "lines+text",x= ~Dt,type='scatter', name = "manifest",text=r$manifest,textposition= "auto",texttemplate="%{y:.2s}")%>%
         add_trace(data = r,y = r$pickup,mode = "lines+text",x= ~Dt ,type='scatter', name = "pickup",text=r$pickup,textposition= "auto",texttemplate="%{y:.2s}")%>%
-        add_trace(data = d,y = round(d$avg,0), mode = "lines+text", x = ~Dt,type = 'scatter', name = "7D-moving average",text=d$avg,textposition= "auto",texttemplate="%{y:.2s}")%>%
+        add_trace(data = d,y = round(d$avg,0), mode = "lines+text", x = ~Dt,type = 'scatter', name = "5D-moving average",text=d$avg,textposition= "auto",texttemplate="%{y:.2s}")%>%
         layout(yaxis = list(title = '<b>Count</b>'))
     }
     
     else { 
-      d<-base_data()$b%>%group_by(week)%>%summarise(pickup = sum(pickup))%>%
+      d<-base()$b%>%filter(!is.na(pickup))%>%group_by(week)%>%summarise(pickup = sum(pickup))%>%
       mutate(avg=roll_mean(pickup, n =2, align = "right", fill = 0))%>%filter(week %in% seq(week(input$dateRange[1]), week(input$dateRange[2])))
     
-    r<- base()%>%group_by(week)%>%
+    r<- base()$a%>%filter(!is.na(pickup))%>%group_by(week)%>%
       summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE))
     
     plot_ly()%>%
       add_trace(data = r,y = ~manifest,mode = "lines+text",x= ~week,type='scatter', name = "manifest",text=r$manifest,textposition= "auto",texttemplate="%{y:.2s}")%>%
       add_trace(data = r,y = r$pickup,mode = "lines+text",x= ~week ,type='scatter', name = "pickup",text=r$pickup,textposition= "auto",texttemplate="%{y:.2s}")%>%
-      add_trace(data = d,y = round(d$avg,0), mode = "lines+text", x = ~week,type = 'scatter', name = "7D-moving average",text=d$avg,textposition= "auto",texttemplate="%{y:.2s}")%>%
+      add_trace(data = d,y = round(d$avg,0), mode = "lines+text", x = ~week,type = 'scatter', name = "5D-moving average",text=d$avg,textposition= "auto",texttemplate="%{y:.2s}")%>%
       layout(yaxis = list(title = '<b>Count</b>'))}
     
   })
@@ -607,11 +622,13 @@ server <- function(input, output,session) {
   
   
   output$mfest1<- renderPlotly({
-    plot_ly(data = base()%>%group_by(wday)%>%
-              summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE)),x = ~wday)%>%
-      add_trace(y = ~manifest, type='bar',name = 'Manifest',textposition = 'outside',texttemplate="%{y:.2s}")%>%
-      add_trace(y = ~pickup,name = 'Pick-up',type='bar',textposition = 'outside',texttemplate="%{y:.2s}")%>%
-      layout(yaxis = list(title = 'Count'),xaxis = list(title = "Period") ,barmode = 'group')
+    plot_ly(data = base()$a%>%group_by(wday)%>%
+              summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE)))%>%
+      add_trace(values = ~pickup, type='pie',labels = ~wday)%>%
+      #add_trace(y = ~pickup,name = 'Pick-up',type='bar',textposition = 'outside',texttemplate="%{y:.2s}")%>%
+      layout(title = 'Pickups by Day of the week',
+             xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+             yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
     
   })
   
@@ -624,29 +641,62 @@ server <- function(input, output,session) {
   )})
   
   # Map Pickup --------------------------------------------------------------
-  output$mfest2<- renderPlotly({ req(input$dr1)
-    mp<-base()%>%filter(!is.na(pickup) & Dt %in% seq(input$dr1[1], input$dr1[2], "day"))%>%
-      group_by(oc,lat.y,lon.y)%>%
-      summarize(pickup = sum(pickup,na.rm = TRUE))
-    
-    mp%>%plot_ly(lat = ~lat.y,
-                 lon = ~lon.y,
-                 size  = ~pickup,
-                 hovertemplate = paste("OC :", mp$oc,"<br> Pickup :", mp$pickup),
-                 #colors = c("springgreen","palevioletred","sandybrown","orange", "orangered", "red"),
-                 type = 'scattermapbox'
-    )%>%layout(
-      
-      mapbox = list(
-        
-        style = 'open-street-map',
-        zoom =3,
-        center = list(lon =85.15743, lat = 25.600421))
-    )
-    
-  })
+  # output$mfest2<- renderPlotly({ req(input$dr1)
+  #   mp<-base()$a%>%filter(!is.na(pickup) & Dt %in% seq(input$dr1[1], input$dr1[2], "day"))%>%
+  #     group_by(oc,lat.y,lon.y)%>%
+  #     summarize(pickup = sum(pickup,na.rm = TRUE))
+  #   
+  #   mp%>%plot_ly(lat = ~lat.y,
+  #                lon = ~lon.y,
+  #                size  = ~pickup,
+  #                hovertemplate = paste("OC :", mp$oc,"<br> Pickup :", mp$pickup),
+  #                #colors = c("springgreen","palevioletred","sandybrown","orange", "orangered", "red"),
+  #                type = 'scattermapbox'
+  #   )%>%layout(
+  #     
+  #     mapbox = list(
+  #       
+  #       style = 'open-street-map',
+  #       zoom =3,
+  #       center = list(lon =85.15743, lat = 25.600421))
+  #   )
+  #   
+  # })
   
 
+  output$p_day<- renderUI({dateInput("pday","Pickup Day",value = input$dateRange[2],min = input$dateRange[1],max = input$dateRange[2] )})
+
+  # Map Pickup2 --------------------------------------------------------------  
+  
+output$mfest4<- renderPlotly({req(input$pday)
+  pchng<- base()$b%>%filter(Dt>= today()-(input$adays+1) & Dt<= today()-(input$adays-1) & !is.na(pickup) & pt!='Pickup')%>%
+    group_by(Dt,cn)%>%
+    summarize(sm=sum(pickup,na.rm = TRUE))%>%ungroup()%>%group_by(cn)%>%summarise(avg= round(mean(sm),0))
+  
+  pvol<- base()$b%>%filter(Dt== input$pday & !is.na(pickup) & pt!='Pickup')%>%
+    group_by(cn,lat.x,lon.x)%>%
+    summarize(pickup = sum(pickup,na.rm = TRUE))%>%filter(pickup>5)%>%
+    left_join(pchng,by = "cn")%>%
+    mutate(chng= round(((pickup-avg)/avg)*100),1)%>%ungroup()%>%slice_max(order_by = pickup,n = vol[[input$pvol]])
+  
+  pvol%>%plot_ly(lat = pvol$lat.x,
+               lon = pvol$lon.x,
+               size  = pvol$pickup,
+               color = pvol$chng,
+               height = 600,
+               hovertemplate = paste("DC :", pvol$cn,"<br> Pickup :", pvol$pickup,"<br> Change% :",pvol$chng,"%"),
+               colors = c("red","springgreen","cyan","dark blue" ),
+               type = 'scattermapbox'
+  )%>%layout(
+    title = "Volume Change by DC",
+    mapbox = list(
+      
+      style = 'open-street-map',
+      zoom =2,
+      center = list(lon =85.15743, lat = 25.600421))
+  )
+  
+})
   
 
   observe({
