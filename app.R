@@ -31,11 +31,13 @@ library(data.table)
 library(stringr)
 library(shinycssloaders)
 library(shinyjs)
+library(RcppRoll)
 
 
 # Initial list ------------------------------------------------------------
 
 dtt<- seq(ymd('2021-08-31'), ymd('2021-12-31'), "day")
+dtt1<- seq(today()-8,today()-1,"day")
 
 client <-list(Amazon = c("AMAZON B2B FRACS","AMAZONINDIA","AMAZONCRETURNS"),
                 Flipkart = c("Flipkart", "FLIPKART - E2E SURFACE", "FLIPKART E2E","FLIPKART SURFACE",
@@ -76,7 +78,7 @@ zone <- list(A="A",B=c("B","B_Shared","B_SPL"),C=c("C","C1","C2","C_SPL"),
              
              All=c("A","B","B_Shared","B_SPL","C","C1","C2","C_SPL","D","D1","D2","D_Shared","D_SPL","DMY","E","F","INTL"))
 
-
+ 
 
 
 
@@ -87,7 +89,6 @@ rds <- dbPool(drv=RMySQL::MySQL(),
               port     = 3306,
               dbname = "business_analytics",
               idleTimeout = 360)
-
 
 
 # UI Section --------------------------------------------------------------
@@ -172,7 +173,7 @@ ui <- dashboardPage(
     )),
     column(2,selectInput("bzn","Billing Zone",choices = names(zone),selected = "All")),
     column(2,
-           selectInput('clnt',"HQ Name",choices = as.list(c(client[["Nykaa"]],"All")),selected = 'All')
+           selectInput('clnt',"HQ Name",choices = as.list(c(client[["Nykaa"]],"All")),selected = 'All',multiple = TRUE)
            )
     ),
     tabItems(
@@ -180,7 +181,7 @@ ui <- dashboardPage(
               fluidRow(infoBoxOutput("del"),infoBoxOutput("avg_s2d"),infoBoxOutput("avg_s2dc")),
               fluidRow(plotlyOutput("speed")),br(),
               uiOutput("speed4"),
-              fluidRow(dataTableOutput("rs2d"))),color="#0dc5c1",hide.ui = FALSE),br(),
+              fluidRow(dataTableOutput("rs2d"))),color="#0dc5c1"),br(),
               fluidRow(
                 tabBox(title = "DC wise FAD/FDDS",selected = "Graph",width = 12,
                        tabPanel("Graph",plotlyOutput("speed2")),
@@ -201,16 +202,16 @@ ui <- dashboardPage(
       ),
       
       tabItem(tabName="brch",
-              
+              withSpinner(tagList(
               fluidRow(infoBoxOutput("promised",width = 3),infoBoxOutput("breach",width = 3),infoBoxOutput("promisedundel",width = 3),infoBoxOutput("breachp",width = 3)),
               
-              fluidRow(plotlyOutput("Breachplt"),br(),
+              fluidRow(plotlyOutput("Breachplt")),br(),
                        uiOutput("brch1"),
                        fluidRow(dataTableOutput("brch2")),
                        uiOutput("brch3"),
                        fluidRow(plotlyOutput("mapbr", height=600))
                        
-              )),
+              ),color="#0dc5c1")),
       
       
       tabItem(tabName = "pikup",
@@ -233,12 +234,13 @@ server <- function(input, output,session) {
     check_credentials = check_credentials(credentials)
   )
   
-
+ 
   
   base_data<-eventReactive(input$btn,{shinyjs::disable("btn")
+    
     a<-rds%>%tbl("s_analytics")%>%
       filter(cl %in% !!client[[input$client]] & pt %in% !!p_type[["Both"]] & mot %in% !!mode[["Both"]] & Dt %in% !!seq(input$dateRange[1], input$dateRange[2], "day"))%>%
-      select(-CRD_NonOTP,-CRD_OTP,-Others,-CNA,-CRR,-year,-month,-ANF,-ODA,-Self_Collect,-Bulkout)%>%collect()
+      select(-CRD_NonOTP,-CRD_OTP,-Others,-CNA,-CRR,-year,-month,-ANF,-ODA,sh_opt,-Bulkout,-pdt)%>%collect()
     setDT(a)
     
     a$Dt<- ymd(a$Dt)
@@ -251,21 +253,27 @@ server <- function(input, output,session) {
     a[is.na(region.x) & str_detect(cn,"Kerala|Tamil Nadu|Karnataka|Telangana|Andhra Pradesh"),region.x:="South"]
     a[is.na(region.x) & str_detect(cn,"Manipur|West Bengal|Orissa"),region.x:="East"]
     
+    b<-rds%>%tbl("s_analytics")%>%
+      filter(cl %in% !!client[[input$client]] & pt %in% !!p_type[["Both"]] & mot %in% !!mode[["Both"]] & Dt %in% !!seq(input$dateRange[1]-7, input$dateRange[2], "day"))%>%
+      group_by(Dt,week)%>%summarise(pickup = sum(pickup))%>%collect()
+    setDT(b)
+    
+    b$Dt<- ymd(b$Dt)
+    c<- list(a=a,b=b)
+    
   },ignoreInit = FALSE,ignoreNULL = FALSE)
   
-  
-  # base<- reactive({base_data()%>%
-  #     filter(pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]])})
 
-  observeEvent(input$btn,{updateSelectInput(session,"clnt","HQ Name",choices = as.list(c(client[[input$client]],"All")),selected = 'All' )})
+  observeEvent(input$btn,{updateSelectInput(session,"clnt","HQ Name",choices = as.list(c(client[[input$client]],"All")),selected = 'All' )
+    })
     
 
   base<- reactive({ 
       if (input$clnt == 'All') {
-      base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],]
+      base_data()$a[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],]
     }
   else{  
-   base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]] & cl == input$clnt,]
+   base_data()$a[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]] & cl %in% input$clnt,]
     }
     })
   
@@ -390,7 +398,7 @@ server <- function(input, output,session) {
       add_trace(y = ~S2DC,mode = "line", type='scatter', yaxis = "y2", name = "Avg S2DC") %>%
       add_trace(y = ~S2Pro,mode = "line", type='scatter', yaxis = "y2", name = "Avg S2Pro") %>%
       layout(yaxis2 = list(overlaying = "y", side = "right"))
-  })
+     })
   
   output$speed4<- renderUI({selectInput('orgn',"Origin Region",choices = names(regn),selected = 'All')})
   
@@ -408,13 +416,12 @@ server <- function(input, output,session) {
   
   
   output$speed2 <- renderPlotly({
-    l1<-l()%>%filter(Del>=5)%>%group_by(Dt)%>%mutate(rank = row_number(desc(Del)))%>%filter(rank<=20)%>%mutate(ln= paste(oc,"-",cn))%>%
+    l1<-l()%>%filter(Del>=10)%>%group_by(Dt)%>%mutate(rank = row_number(desc(Del)))%>%filter(rank<=20)%>%mutate(ln= paste(oc,"-",cn))%>%
       pivot_wider(id_cols = (ln),names_from = Dt,values_from = S2D)%>%
       mutate(cnt = rowSums(!is.na(select(., -ln))))%>%arrange((cnt))
     
     l2<- as.matrix(l1[,c(-1,-ncol(l1))])
-    # k <- which(is.na(f2), arr.ind=TRUE)
-    # f2[k] <- rowMeans(f2, na.rm=TRUE)[k[,1]]
+
     dimnames(l2)[1]<- list((l1$ln))
     plot_ly(x=dimnames(l2)[[2]],y=dimnames(l2)[[1]],z = l2, type = "heatmap",colors = colorRamp(c("blue","yellow", "red")))%>%
       layout(yaxis = list(title = '<b>Lane</b>'),xaxis = list(title = "Day"),title="<b>S2D by Lane</b>")
@@ -422,7 +429,7 @@ server <- function(input, output,session) {
   })
   
   output$speed3<- renderDataTable(
-    l()%>%filter(Del>=5),server = FALSE,filter = 'top',rownames=FALSE,
+    l()%>%filter(Del>=10),server = FALSE,filter = 'top',rownames=FALSE,
     extensions = 'Buttons',
     
     options = list(
@@ -459,7 +466,7 @@ server <- function(input, output,session) {
   
   output$fad3<- renderUI({selectInput('st',"State",choices = as.list(c(unique(base()%>%select(state.x)),"All")),selected = 'All')})
   
-  f<-reactive({
+  f<-reactive({req(input$st)
     if (input$st == 'All') {
       base()%>%group_by(Dt,cn)%>%
         summarise(OFD=sum(OFD,na.rm = TRUE),FAD = (sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100)%>%
@@ -473,7 +480,7 @@ server <- function(input, output,session) {
   
   
   output$fad4 <- renderPlotly({
-    f1<-f()%>%filter(OFD>=5)%>%group_by(Dt)%>%mutate(rank = row_number(desc(OFD)))%>%filter(rank<=40)%>%select(cn,Dt,FAD)%>%
+    f1<-f()%>%filter(OFD>=10)%>%group_by(Dt)%>%mutate(rank = row_number(desc(OFD)))%>%filter(rank<=40)%>%select(cn,Dt,FAD)%>%
       pivot_wider(id_cols = (cn),names_from = Dt,values_from = FAD)%>%
       mutate(total = sum(c_across(where(is.numeric)),na.rm = TRUE),cnt = rowSums(!is.na(select(., -cn))))%>%arrange(cnt,desc(total))
     
@@ -487,7 +494,7 @@ server <- function(input, output,session) {
   })
   
   output$fad5<- renderDataTable(
-    f()%>%filter(OFD>=5)%>%mutate(FAD=round(FAD,2)),server = FALSE,filter = 'top',rownames=FALSE,
+    f()%>%filter(OFD>=10)%>%mutate(FAD=round(FAD,2)),server = FALSE,filter = 'top',rownames=FALSE,
     extensions = 'Buttons',
     
     options = list(
@@ -509,7 +516,7 @@ server <- function(input, output,session) {
       summarise(Promise = sum(Total_Promised,na.rm = TRUE),Promise_UD =sum(Promised_undel,na.rm = TRUE), Breach=round(sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE)*100,2),na.rm = TRUE)
     plot_ly(data = sp,x = as.formula(paste0("~", freq[[input$period]]))) %>%
       add_trace(y = ~Promise,type = "bar", name = "Promised",textposition = 'outside',texttemplate="%{y:.2s}",marker = list(color = 'rgb(158,202,225)',line = list(color = 'rgb(8,48,107)'))) %>%
-      add_trace(y = ~Breach,mode = "line", type='scatter', yaxis = "y2", name = "Breach%",color='rgb(220,20,60)',text=~round(Breach,2),textposition= "top center") %>%
+      add_trace(y = ~Breach,mode = "lines+text", type='scatter', yaxis = "y2", name = "Breach%",color='rgb(220,20,60)',text=~round(Breach,2),textposition= "top center") %>%
       layout(yaxis2 = list(overlaying = "y", side = "right"))
   })
   
@@ -517,7 +524,7 @@ server <- function(input, output,session) {
   output$brch1<- renderUI({selectInput('borgn',"Origin Region",choices = names(regn),selected = 'All')})
   
   output$brch2 <- renderDataTable(
-    base()%>%filter(region.y %in% !!regn[[input$borgn]])%>%
+    base()%>%filter(region.y %in% !!regn[[req(input$borgn)]])%>%
       group_by(!!sym(freq[[input$period]]),region.x)%>%
       summarise(Breach = round((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100,2))%>%
       pivot_wider(id_cols = region.x,names_from = !!sym(freq[[input$period]]),values_from =Breach),options = list(scrollX = T)
@@ -534,7 +541,7 @@ server <- function(input, output,session) {
   )})
 
   # Map Breach --------------------------------------------------------------
-  output$mapbr<- renderPlotly({
+  output$mapbr<- renderPlotly({req(input$dr2)
     mp<-base()%>%filter(Dt %in% seq(input$dr2[1], input$dr2[2], "day"))%>%group_by(cn,lat.x,lon.x)%>%
       summarize(Brh= round((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100,2),Prms=sum(Total_Promised,na.rm = TRUE))%>%
       ungroup%>%filter(Prms>=median(Prms))
@@ -562,13 +569,41 @@ server <- function(input, output,session) {
   
   
   output$mfest<- renderPlotly({
-    plot_ly(data = base()%>%group_by(!!sym(freq[[input$period]]))%>%
-              summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE)),x = as.formula(paste0("~", freq[[input$period]])))%>%
-      add_trace(y = ~manifest,mode = "lines+text", type='scatter', name = "manifest",text=~manifest,textposition= "auto",texttemplate="%{y:.2s}")%>%
-      add_trace(y = ~pickup,mode = "lines+text", type='scatter', name = "pickup",text=~pickup,textposition= "auto",texttemplate="%{y:.2s}")%>%
-      layout(yaxis = list(title = '<b>Count</b>'))
+    if (freq[[input$period]]=="Dt") {
+      d<-base_data()$b%>%group_by(Dt)%>%summarise(pickup = sum(pickup))%>%
+        mutate(avg=roll_mean(pickup, n = 7, align = "right", fill = 0))%>%filter(Dt %in% seq(input$dateRange[1], input$dateRange[2], "day"))
+      
+      
+      r<- base()%>%group_by(Dt)%>%
+        summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE))
+      #!!sym(freq[[input$period]])  
+      #x = as.formula(paste0("~", freq[[input$period]]))
+      plot_ly()%>%
+        add_trace(data = r,y = ~manifest,mode = "lines+text",x= ~Dt,type='scatter', name = "manifest",text=r$manifest,textposition= "auto",texttemplate="%{y:.2s}")%>%
+        add_trace(data = r,y = r$pickup,mode = "lines+text",x= ~Dt ,type='scatter', name = "pickup",text=r$pickup,textposition= "auto",texttemplate="%{y:.2s}")%>%
+        add_trace(data = d,y = round(d$avg,0), mode = "lines+text", x = ~Dt,type = 'scatter', name = "7D-moving average",text=d$avg,textposition= "auto",texttemplate="%{y:.2s}")%>%
+        layout(yaxis = list(title = '<b>Count</b>'))
+    }
+    
+    else { 
+      d<-base_data()$b%>%group_by(week)%>%summarise(pickup = sum(pickup))%>%
+      mutate(avg=roll_mean(pickup, n =2, align = "right", fill = 0))%>%filter(week %in% seq(week(input$dateRange[1]), week(input$dateRange[2])))
+    
+    r<- base()%>%group_by(week)%>%
+      summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE))
+    
+    plot_ly()%>%
+      add_trace(data = r,y = ~manifest,mode = "lines+text",x= ~week,type='scatter', name = "manifest",text=r$manifest,textposition= "auto",texttemplate="%{y:.2s}")%>%
+      add_trace(data = r,y = r$pickup,mode = "lines+text",x= ~week ,type='scatter', name = "pickup",text=r$pickup,textposition= "auto",texttemplate="%{y:.2s}")%>%
+      add_trace(data = d,y = round(d$avg,0), mode = "lines+text", x = ~week,type = 'scatter', name = "7D-moving average",text=d$avg,textposition= "auto",texttemplate="%{y:.2s}")%>%
+      layout(yaxis = list(title = '<b>Count</b>'))}
     
   })
+  
+  
+  
+  
+  
   
   
   output$mfest1<- renderPlotly({
@@ -589,7 +624,7 @@ server <- function(input, output,session) {
   )})
   
   # Map Pickup --------------------------------------------------------------
-  output$mfest2<- renderPlotly({
+  output$mfest2<- renderPlotly({ req(input$dr1)
     mp<-base()%>%filter(!is.na(pickup) & Dt %in% seq(input$dr1[1], input$dr1[2], "day"))%>%
       group_by(oc,lat.y,lon.y)%>%
       summarize(pickup = sum(pickup,na.rm = TRUE))
@@ -610,6 +645,8 @@ server <- function(input, output,session) {
     )
     
   })
+  
+
   
 
   observe({
