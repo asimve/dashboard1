@@ -77,16 +77,17 @@ freq<- list(Daily = "Dt",
 
 zone <- list(A="A",B=c("B","B_Shared","B_SPL"),C=c("C","C1","C2","C_SPL"),
              D=c("D","D1","D2","DMY","D_Shared","D_SPL"),
-             E="E",F="F",International="INTL",
+             E="E", 'F' ="F",International="INTL",
              
-             All=c("A","B","B_Shared","B_SPL","C","C1","C2","C_SPL","D","D1","D2","D_Shared","D_SPL","DMY","E","F","INTL"))
+             All=c("NA","A","B","B_Shared","B_SPL","C","C1","C2","C_SPL","D","D1","D2","D_Shared","D_SPL","DMY","E","F","INTL"))
 
 vol<- list("Top 25" = 25,
            "Top 50" = 50,
            "Top 100" = 100,
            "Top 200" = 200,
-           "Top 400" = 400)
- 
+           "Top 400" = 400,
+           "Top 800" = 800,
+           "All" = 5000)
 
 
 
@@ -97,6 +98,7 @@ rds <- dbPool(drv=RMySQL::MySQL(),
               port     = 3306,
               dbname = "business_analytics",
               idleTimeout = 360)
+
 
 
 # UI Section --------------------------------------------------------------
@@ -192,7 +194,7 @@ ui <- dashboardPage(
               uiOutput("speed4"),
               fluidRow(dataTableOutput("rs2d"))),color="#0dc5c1"),br(),
               fluidRow(
-                tabBox(title = "DC wise FAD/FDDS",selected = "Graph",width = 12,
+                tabBox(title = "Lane wise speed",selected = "Graph",width = 12,
                        tabPanel("Graph",plotlyOutput("speed2")),
                        tabPanel("Table",dataTableOutput("speed3"))
                 ))),
@@ -227,12 +229,11 @@ ui <- dashboardPage(
               withSpinner(tagList(
               fluidRow(infoBoxOutput("o_man"),infoBoxOutput("o_pik")),
               fluidRow(plotlyOutput("mfest")),br(),
-              fluidRow(plotlyOutput("mfest1")),br(),
-              #uiOutput("mfest3"),
-              #fluidRow(plotlyOutput("mfest2")),br(),
               fluidRow(column(3,uiOutput("p_day")),column(3,sliderInput("adays",label = "Days to compare",min = 2,max = 5,step = 1,value = 3)),
-                       column(3,selectInput("pvol","Volume Filter",choices = names(vol),selected = "Top 50"))),
-              fluidRow(plotlyOutput("mfest4",height = 600))),color="#0dc5c1")
+                       column(3,selectInput("pvol","Volume Filter",choices = names(vol),selected = "Top 100")),
+                       column(3,uiOutput("slider"))),
+              fluidRow(plotlyOutput("mfest4",height = 600)),br(),
+              fluidRow(plotlyOutput("mfest1"))),color="#0dc5c1")
       )
       
     )
@@ -246,8 +247,7 @@ server <- function(input, output,session) {
     check_credentials = check_credentials(credentials)
   )
   
- 
-  
+
   base_data<-eventReactive(input$btn,{shinyjs::disable("btn")
     
     a<-rds%>%tbl("s_analytics")%>%
@@ -265,6 +265,13 @@ server <- function(input, output,session) {
     a[is.na(region.x) & str_detect(cn,"Kerala|Tamil Nadu|Karnataka|Telangana|Andhra Pradesh"),region.x:="South"]
     a[is.na(region.x) & str_detect(cn,"Manipur|West Bengal|Orissa"),region.x:="East"]
     
+    a[oc=="NSZ",region.y:="North"]
+    a[is.na(region.y) & str_detect(oc,"Rajasthan|Punjab|Ladakh|Haryana|Uttar Pradesh|Chandigarh"),region.y:="North"]
+    a[is.na(region.y) & str_detect(oc,"Maharashtra|Madhya Pradesh"),region.y:="West"]
+    a[is.na(region.y) & str_detect(oc,"Kerala|Tamil Nadu|Karnataka|Telangana|Andhra Pradesh"),region.y:="South"]
+    a[is.na(region.y) & str_detect(oc,"Manipur|West Bengal|Orissa"),region.y:="East"]
+    
+    a[is.na(bzn),bzn:="NA"]
     # b<-rds%>%tbl("s_analytics")%>%
     #   filter(cl %in% !!client[[input$client]] & pt %in% !!p_type[["All"]] & mot %in% !!mode[["Both"]] & Dt %in% !!seq(input$dateRange[1]-7, input$dateRange[2], "day"))%>%
     #   group_by(Dt,week)%>%summarise(pickup = sum(pickup))%>%collect()
@@ -281,13 +288,13 @@ server <- function(input, output,session) {
     
 
   base<- reactive({ 
-      if (input$clnt == 'All') {
-     a<- base_data()[Dt >= input$dateRange[1] & pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],]
+      if (input$clnt %in% 'All') {
+     a<- base_data()[Dt >= input$dateRange[1] & pt %in% p_type[["All"]] & mot %in% mode[["Both"]] & region.x %in% regn[["All"]] & region.y %in% regn[["All"]] & bzn %in% zone[[input$bzn]],]
      b<- base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],]
      c<- list(a=a,b=b)
      }
   else{  
-   a<-base_data()[Dt >= input$dateRange[1] & pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]] & cl %in% input$clnt,]
+   a<-base_data()[Dt  >= input$dateRange[1] & pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]] & cl %in% input$clnt,]
    b<- base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]] & cl %in% input$clnt,] 
    c<- list(a=a,b=b)
    }
@@ -454,12 +461,12 @@ server <- function(input, output,session) {
   )
   
   l<- reactive({base()$a%>%filter(!is.na(delivered))%>%
-      group_by(Dt,oc,cn)%>%summarise(Del=sum(delivered),S2D = round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered,na.rm = TRUE),2))%>%
-      filter(oc!="" &  !is.nan(S2D))%>%arrange(Dt,desc(Del))})
+      group_by(Dt,city.y,city.x)%>%summarise(Del=sum(delivered),S2D = round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered,na.rm = TRUE),2))%>%
+      filter(city.y!="" &  !is.nan(S2D))%>%arrange(Dt,desc(Del))})
   
   
   output$speed2 <- renderPlotly({
-    l1<-l()%>%filter(Del>=10)%>%group_by(Dt)%>%mutate(rank = row_number(desc(Del)))%>%filter(rank<=20)%>%mutate(ln= paste(oc,"-",cn))%>%
+    l1<-l()%>%filter(Del>=10 & !is.na(city.x))%>%group_by(Dt)%>%mutate(rank = row_number(desc(Del)))%>%filter(rank<=20)%>%mutate(ln= paste(city.y,"-",city.x))%>%
       pivot_wider(id_cols = (ln),names_from = Dt,values_from = S2D)%>%
       mutate(cnt = rowSums(!is.na(select(., -ln))))%>%arrange((cnt))
     
@@ -525,7 +532,7 @@ server <- function(input, output,session) {
   output$fad4 <- renderPlotly({
     f1<-f()%>%filter(OFD>=10)%>%group_by(Dt)%>%mutate(rank = row_number(desc(OFD)))%>%filter(rank<=40)%>%select(cn,Dt,FAD)%>%
       pivot_wider(id_cols = (cn),names_from = Dt,values_from = FAD)%>%
-      mutate(total = sum(c_across(where(is.numeric)),na.rm = TRUE),cnt = rowSums(!is.na(select(., -cn))))%>%arrange(cnt,desc(total))
+      mutate(total = sum(c_across(where(is.numeric)),na.rm = TRUE),cnt = rowSums(!is.na(select(., -cn))))%>%arrange(cnt,total)
 
     f2<- as.matrix(f1[,c(-1,-(ncol(f1)-1),-ncol(f1))])
     # k <- which(is.na(f2), arr.ind=TRUE)
@@ -647,18 +654,18 @@ server <- function(input, output,session) {
   
   
   output$mfest<- renderPlotly({
+
     if (freq[[input$period]]=="Dt") {
       d<-base()$b%>%filter(!is.na(pickup))%>%group_by(Dt)%>%summarise(pickup = sum(pickup))%>%
         mutate(avg=roll_mean(pickup, n = 5, align = "right", fill = 0))%>%filter(Dt %in% seq(input$dateRange[1], input$dateRange[2], "day"))
       
-      
-      r<- base()$a%>%filter(!is.na(pickup))%>%group_by(Dt)%>%
-        summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE))
+      r<- base()$a[,.(pickup=sum(pickup,na.rm = TRUE),manifest=sum(manifested,na.rm = TRUE)),by = Dt]
+  
       #!!sym(freq[[input$period]])  
       #x = as.formula(paste0("~", freq[[input$period]]))
       plot_ly()%>%
         add_trace(data = r,y = ~manifest,mode = "lines+text",x= ~Dt,type='scatter', name = "manifest",text=r$manifest,textposition= "auto",texttemplate="%{y:.2s}")%>%
-        add_trace(data = r,y = r$pickup,mode = "lines+text",x= ~Dt ,type='scatter', name = "pickup",text=r$pickup,textposition= "auto",texttemplate="%{y:.2s}")%>%
+        add_trace(data = r,y = ~pickup,mode = "lines+text",x= ~Dt ,type='scatter', name = "pickup",text=r$pickup,textposition= "auto",texttemplate="%{y:.2s}")%>%
         add_trace(data = d,y = round(d$avg,0), mode = "lines+text", x = ~Dt,type = 'scatter', name = "5D-moving average",text=d$avg,textposition= "auto",texttemplate="%{y:.2s}")%>%
         layout(yaxis = list(title = '<b>Count</b>'))
     }
@@ -667,7 +674,7 @@ server <- function(input, output,session) {
       d<-base()$b%>%filter(!is.na(pickup))%>%group_by(week)%>%summarise(pickup = sum(pickup))%>%
       mutate(avg=roll_mean(pickup, n =2, align = "right", fill = 0))%>%filter(week %in% seq(week(input$dateRange[1]), week(input$dateRange[2])))
     
-    r<- base()$a%>%filter(!is.na(pickup))%>%group_by(week)%>%
+    r<- base()$a%>%group_by(week)%>%
       summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE))
     
     plot_ly()%>%
@@ -726,22 +733,41 @@ server <- function(input, output,session) {
   #   
   # })
   
-
   output$p_day<- renderUI({dateInput("pday","Pickup Day",value = input$dateRange[2],min = input$dateRange[1],max = input$dateRange[2] )})
+  
+    pvol1<- reactive({req(input$pday)
+    pchng<- base()$b%>%filter(Dt>= today()-(input$adays+1) & Dt<= today()-(input$adays-1) & !is.na(pickup) & pt!='Pickup')%>%
+      group_by(Dt,cn)%>%
+      summarize(sm=sum(pickup,na.rm = TRUE))%>%ungroup()%>%group_by(cn)%>%summarise(avg= round(mean(sm),0))
+    
+    pvol<- base()$b%>%filter(Dt== input$pday & !is.na(pickup) & pt!='Pickup')%>%
+      group_by(cn,lat.x,lon.x)%>%
+      summarize(pickup = sum(pickup,na.rm = TRUE))%>%filter(pickup>5)%>%
+      left_join(pchng,by = "cn")%>%
+      mutate(chng= round(((pickup-avg)/avg)*100),1)})
+
+    output$slider<- renderUI({req(pvol1())
+      sliderInput("slider1","Change Range%",min = min(pvol1()$chng,na.rm = TRUE),
+                  max = max(pvol1()$chng,na.rm = TRUE),value = c(min(pvol1()$chng,na.rm = TRUE),max(pvol1()$chng,na.rm = TRUE)))})
+  
 
   # Map Pickup2 --------------------------------------------------------------  
   
-output$mfest4<- renderPlotly({req(input$pday)
-  pchng<- base()$b%>%filter(Dt>= today()-(input$adays+1) & Dt<= today()-(input$adays-1) & !is.na(pickup) & pt!='Pickup')%>%
-    group_by(Dt,cn)%>%
-    summarize(sm=sum(pickup,na.rm = TRUE))%>%ungroup()%>%group_by(cn)%>%summarise(avg= round(mean(sm),0))
-  
-  pvol<- base()$b%>%filter(Dt== input$pday & !is.na(pickup) & pt!='Pickup')%>%
-    group_by(cn,lat.x,lon.x)%>%
-    summarize(pickup = sum(pickup,na.rm = TRUE))%>%filter(pickup>5)%>%
-    left_join(pchng,by = "cn")%>%
-    mutate(chng= round(((pickup-avg)/avg)*100),1)%>%ungroup()%>%slice_max(order_by = pickup,n = vol[[input$pvol]])
-  
+output$mfest4<- renderPlotly({req(input$slider1)
+  # req(input$pday)
+  # pchng<- base()$b%>%filter(Dt>= today()-(input$adays+1) & Dt<= today()-(input$adays-1) & !is.na(pickup) & pt!='Pickup')%>%
+  #   group_by(Dt,cn)%>%
+  #   summarize(sm=sum(pickup,na.rm = TRUE))%>%ungroup()%>%group_by(cn)%>%summarise(avg= round(mean(sm),0))
+  # 
+  # pvol<- base()$b%>%filter(Dt== input$pday & !is.na(pickup) & pt!='Pickup')%>%
+  #   group_by(cn,lat.x,lon.x)%>%
+  #   summarize(pickup = sum(pickup,na.rm = TRUE))%>%filter(pickup>5)%>%
+  #   left_join(pchng,by = "cn")%>%
+  #   mutate(chng= round(((pickup-avg)/avg)*100),1)%>%ungroup()%>%slice_max(order_by = pickup,n = vol[[input$pvol]])
+pvol<- pvol1()%>%filter(chng >= input$slider1[1] & chng <= input$slider1[2])%>%
+  ungroup()%>%
+  slice_max(order_by = pickup,n = vol[[input$pvol]])
+    
   pvol%>%plot_ly(lat = pvol$lat.x,
                lon = pvol$lon.x,
                size  = pvol$pickup,
@@ -749,14 +775,16 @@ output$mfest4<- renderPlotly({req(input$pday)
                height = 600,
                hovertemplate = paste("DC :", pvol$cn,"<br> Pickup :", pvol$pickup,"<br> Change% :",pvol$chng,"%"),
                colors = c("red","springgreen","cyan","dark blue" ),
-               type = 'scattermapbox'
-  )%>%layout(
+               type = 'scattermapbox')%>%
+    layout(
     title = "Volume Change by DC",
     mapbox = list(
       
       style = 'open-street-map',
       zoom =2,
-      center = list(lon =85.15743, lat = 25.600421))
+      center = list(lon =85.15743, lat = 25.600421)),
+    xaxis = list(
+    rangeslider = list(type="date"))
   )
   
 })
@@ -773,6 +801,7 @@ output$mfest4<- renderPlotly({req(input$pday)
     
   })
   
+
   
 }
 
