@@ -37,7 +37,7 @@ library(RcppRoll)
 # Initial list ------------------------------------------------------------
 
 dtt<- seq(ymd('2021-08-31'), ymd('2021-12-31'), "day")
-#dtt1<- seq(today()-30,today()-1,"day")
+#dtt1<- seq(today()-15,today()-1,"day")
 
 client <-list(Amazon = c("AMAZON B2B FRACS","AMAZONINDIA","AMAZONCRETURNS"),
                 Flipkart = c("Flipkart", "FLIPKART - E2E SURFACE", "FLIPKART E2E","FLIPKART SURFACE",
@@ -186,8 +186,9 @@ ui <- dashboardPage(
     ),
     tabItems(
       tabItem(tabName = "speed",withSpinner(tagList(
-              fluidRow(infoBoxOutput("del"),infoBoxOutput("avg_s2d"),infoBoxOutput("avg_s2dc")),
+              fluidRow(infoBoxOutput("del",width = 3),infoBoxOutput("att",width = 3),infoBoxOutput("avg_s2d",width = 2),infoBoxOutput("avg_s2dc",width = 2),infoBoxOutput("avg_s2a",width = 2)),
               fluidRow(plotlyOutput("speed")),br(),
+              fluidRow(plotlyOutput("speed6")),br(),
               uiOutput("speed4"),
               fluidRow(dataTableOutput("rs2d"))),color="#0dc5c1"),br(),
               fluidRow(
@@ -287,7 +288,7 @@ server <- function(input, output,session) {
      }
   else{  
    a<-base_data()[Dt >= input$dateRange[1] & pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]] & cl %in% input$clnt,]
-   b<- base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],] 
+   b<- base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]] & cl %in% input$clnt,] 
    c<- list(a=a,b=b)
    }
     })
@@ -302,6 +303,13 @@ server <- function(input, output,session) {
     x<- base()$a[!is.na(delivered),.(sum(delivered))]
     x%>%round(digits = 1) %>% prettyNum(big.mark = ",") %>%
       infoBox(title = "Delivered",icon = icon("gift"),color = "blue",fill=FALSE)
+    
+  })
+  
+  output$att<- renderInfoBox({ 
+    x<- base()$a[!is.na(attempted),.(sum(attempted))]
+    x%>%round(digits = 1) %>% prettyNum(big.mark = ",") %>%
+      infoBox(title = "Attempted",icon = icon("exclamation-circle"),color = "blue",fill=FALSE)
     
   })
   
@@ -337,14 +345,21 @@ server <- function(input, output,session) {
   output$avg_s2d<- renderInfoBox({
     x<- base()$a[!is.na(delivered),.(round(sum((S2D*delivered),na.rm = TRUE)/sum(delivered),2))]
     x%>%round(digits = 2)%>%
-      infoBox(title = "S2D",icon = icon("dashboard"),color = "purple",fill=FALSE)
+      infoBox(title = "S2D",color = "purple",fill=FALSE)
+    
+  })
+  
+  output$avg_s2a<- renderInfoBox({
+    x<- base()$a[!is.na(delivered),.(round(sum((S2A*attempted),na.rm = TRUE)/sum(delivered),2))]
+    x%>%round(digits = 2)%>%
+      infoBox(title = "S2A",color = "purple",fill=FALSE)
     
   })
   
   output$avg_s2dc<- renderInfoBox({
     x<- base()$a[!is.na(delivered),.(round(sum((S2DC*delivered),na.rm = TRUE)/sum(delivered),2))]
     x %>% round(digits = 2)%>%
-      infoBox(title = "S2DC",icon = icon("dashboard"),color = "purple",fill=FALSE)
+      infoBox(title = "S2DC",color = "purple",fill=FALSE)
     
   })
   
@@ -414,6 +429,19 @@ server <- function(input, output,session) {
       add_trace(y = ~S2Pro,mode = "line", type='scatter', yaxis = "y2", name = "Avg S2Pro") %>%
       layout(yaxis2 = list(overlaying = "y", side = "right"))
      })
+  
+  output$speed6 <- renderPlotly({
+    sp<- base()$a%>%filter(!is.na(attempted))%>%group_by(!!sym(freq[[input$period]]))%>%
+      summarise(Attempted = sum(attempted),S2A = round(sum((S2A*attempted),na.rm = TRUE)/sum(attempted),2))
+    
+    
+    plot_ly(data = sp,x = as.formula(paste0("~", freq[[input$period]]))) %>%
+      add_trace(y = ~Attempted,type = "bar", name = "Attempted",textposition = 'outside',texttemplate="%{y:.2s}",marker = list(color = 'rgb(158,202,225)',line = list(color = 'rgb(8,48,107)')))%>%
+      add_trace(y = ~S2A,mode = "lines+text", type='scatter', yaxis = "y2", name = "Avg S2A",text=~round(S2A,2),textposition= "top center") %>%
+      layout(title="Attempts",yaxis2 = list(overlaying = "y", side = "right"))
+  })
+  
+  
   
   output$speed4<- renderUI({selectInput('orgn',"Origin Region",choices = names(regn),selected = 'All')})
   
@@ -498,15 +526,50 @@ server <- function(input, output,session) {
     f1<-f()%>%filter(OFD>=10)%>%group_by(Dt)%>%mutate(rank = row_number(desc(OFD)))%>%filter(rank<=40)%>%select(cn,Dt,FAD)%>%
       pivot_wider(id_cols = (cn),names_from = Dt,values_from = FAD)%>%
       mutate(total = sum(c_across(where(is.numeric)),na.rm = TRUE),cnt = rowSums(!is.na(select(., -cn))))%>%arrange(cnt,desc(total))
-    
+
     f2<- as.matrix(f1[,c(-1,-(ncol(f1)-1),-ncol(f1))])
     # k <- which(is.na(f2), arr.ind=TRUE)
     # f2[k] <- rowMeans(f2, na.rm=TRUE)[k[,1]]
     dimnames(f2)[1]<- list((f1$cn))
     plot_ly(x=dimnames(f2)[[2]],y=dimnames(f2)[[1]],z = f2, type = "heatmap",colors = colorRamp(c("red","yellow" ,"blue")),height = 600)%>%
       layout(yaxis = list(title = '<b>Dispatch Center</b>'),xaxis = list(title = "Day"),title="<b>FAD by DC</b>")
-    
+
   })
+  
+  # output$fad4<- renderPlotly({
+  #   fchng<- base()$b%>%filter(Dt>= today()-4 & Dt<= today()-2 & !is.na(OFD))%>%
+  #     group_by(cn)%>%
+  #     summarize(avg=(sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100)
+  #   
+  #   fvol<- base()$b%>%filter(Dt== today()-1 & !is.na(OFD))%>%
+  #     group_by(cn,lat.x,lon.x)%>%
+  #     summarize(ofd=sum(OFD,na.rm = TRUE),fad=(sum(FAD,na.rm = TRUE)/sum(OFD,na.rm = TRUE))*100)%>%
+  #     filter(ofd>10)%>%
+  #     left_join(fchng,by = "cn")%>%
+  #     mutate(chng= round(((fad-avg)/avg)*100),1)%>%ungroup()%>%slice_max(order_by = ofd,n=100)
+  #   
+  #   fvol%>%plot_ly(lat = fvol$lat.x,
+  #                  lon = fvol$lon.x,
+  #                  size  = fvol$ofd,
+  #                  color = fvol$chng,
+  #                  height = 600,
+  #                  hovertemplate = paste("DC :", fvol$cn,"<br> OFD :", fvol$ofd,"<br> FAD :", fvol$fad,"<br> FDDS% :",fvol$chng,"%"),
+  #                  colors = c("red","springgreen","cyan","dark blue" ),
+  #                  type = 'scattermapbox'
+  #   )%>%layout(
+  #     title = "FDDS Change by DC",
+  #     mapbox = list(
+  #       
+  #       style = 'open-street-map',
+  #       zoom =2,
+  #       center = list(lon =85.15743, lat = 25.600421))
+  #   )
+  #   
+  # })
+  
+  
+  
+  
   
   output$fad5<- renderDataTable(
     f()%>%filter(OFD>=10)%>%mutate(FAD=round(FAD,2)),server = FALSE,filter = 'top',rownames=FALSE,
