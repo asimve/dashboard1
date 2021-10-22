@@ -289,7 +289,7 @@ server <- function(input, output,session) {
 
   base<- reactive({ 
       if (input$clnt %in% 'All') {
-     a<- base_data()[Dt >= input$dateRange[1] & pt %in% p_type[["All"]] & mot %in% mode[["Both"]] & region.x %in% regn[["All"]] & region.y %in% regn[["All"]] & bzn %in% zone[[input$bzn]],]
+     a<- base_data()[Dt >= input$dateRange[1] & pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],]
      b<- base_data()[pt %in% p_type[[input$pt]] & mot %in% mode[[input$mot]] & region.x %in% regn[[input$rgn]] & region.y %in% regn[[input$rgn1]] & bzn %in% zone[[input$bzn]],]
      c<- list(a=a,b=b)
      }
