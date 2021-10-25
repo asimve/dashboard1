@@ -272,13 +272,6 @@ server <- function(input, output,session) {
     a[is.na(region.y) & str_detect(oc,"Manipur|West Bengal|Orissa"),region.y:="East"]
     
     a[is.na(bzn),bzn:="NA"]
-    # b<-rds%>%tbl("s_analytics")%>%
-    #   filter(cl %in% !!client[[input$client]] & pt %in% !!p_type[["All"]] & mot %in% !!mode[["Both"]] & Dt %in% !!seq(input$dateRange[1]-7, input$dateRange[2], "day"))%>%
-    #   group_by(Dt,week)%>%summarise(pickup = sum(pickup))%>%collect()
-    # setDT(b)
-    # 
-    # b$Dt<- ymd(b$Dt)
-    # c<- list(a=a,b=b)
     
   },ignoreInit = FALSE,ignoreNULL = FALSE)
   
@@ -674,8 +667,7 @@ server <- function(input, output,session) {
       d<-base()$b%>%filter(!is.na(pickup))%>%group_by(week)%>%summarise(pickup = sum(pickup))%>%
       mutate(avg=roll_mean(pickup, n =2, align = "right", fill = 0))%>%filter(week %in% seq(week(input$dateRange[1]), week(input$dateRange[2])))
     
-    r<- base()$a%>%group_by(week)%>%
-      summarise(manifest = sum(manifested,na.rm = TRUE),pickup = sum(pickup,na.rm = TRUE))
+      r<- base()$a[,.(pickup=sum(pickup,na.rm = TRUE),manifest=sum(manifested,na.rm = TRUE)),by = week]
     
     plot_ly()%>%
       add_trace(data = r,y = ~manifest,mode = "lines+text",x= ~week,type='scatter', name = "manifest",text=r$manifest,textposition= "auto",texttemplate="%{y:.2s}")%>%
@@ -753,27 +745,23 @@ server <- function(input, output,session) {
 
   # Map Pickup2 --------------------------------------------------------------  
   
-output$mfest4<- renderPlotly({req(input$slider1)
-  # req(input$pday)
-  # pchng<- base()$b%>%filter(Dt>= today()-(input$adays+1) & Dt<= today()-(input$adays-1) & !is.na(pickup) & pt!='Pickup')%>%
-  #   group_by(Dt,cn)%>%
-  #   summarize(sm=sum(pickup,na.rm = TRUE))%>%ungroup()%>%group_by(cn)%>%summarise(avg= round(mean(sm),0))
-  # 
-  # pvol<- base()$b%>%filter(Dt== input$pday & !is.na(pickup) & pt!='Pickup')%>%
-  #   group_by(cn,lat.x,lon.x)%>%
-  #   summarize(pickup = sum(pickup,na.rm = TRUE))%>%filter(pickup>5)%>%
-  #   left_join(pchng,by = "cn")%>%
-  #   mutate(chng= round(((pickup-avg)/avg)*100),1)%>%ungroup()%>%slice_max(order_by = pickup,n = vol[[input$pvol]])
+output$mfest4<- renderPlotly({
+  req(input$slider1)
+  
+  mp<-base()$a%>%filter(Dt>= today()-(input$adays+1) & Dt<= today()-(input$adays-1))%>%group_by(cn,lat.x,lon.x)%>%
+    summarize(Brh= round((sum(PDD_Breach,na.rm = TRUE)/sum(Total_Promised,na.rm = TRUE))*100,2),Prms=sum(Total_Promised,na.rm = TRUE))%>%
+    ungroup()
+  
 pvol<- pvol1()%>%filter(chng >= input$slider1[1] & chng <= input$slider1[2])%>%
   ungroup()%>%
-  slice_max(order_by = pickup,n = vol[[input$pvol]])
+  slice_max(order_by = pickup,n = vol[[input$pvol]])%>%left_join(mp%>%select(cn,Brh),by = "cn")
     
   pvol%>%plot_ly(lat = pvol$lat.x,
                lon = pvol$lon.x,
                size  = pvol$pickup,
                color = pvol$chng,
                height = 600,
-               hovertemplate = paste("DC :", pvol$cn,"<br> Pickup :", pvol$pickup,"<br> Change% :",pvol$chng,"%"),
+               hovertemplate = paste("DC :", pvol$cn,"<br> Pickup :", pvol$pickup,"<br> Change% :",pvol$chng,"%","<br> Avg Breach% :",pvol$Brh,"%"),
                colors = c("red","springgreen","cyan","dark blue" ),
                type = 'scattermapbox')%>%
     layout(
